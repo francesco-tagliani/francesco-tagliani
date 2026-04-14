@@ -12,7 +12,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
-      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -62,15 +61,20 @@ jobs:
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
         working-directory: whatsapp-sticker-uploader
 
-      - name: Commit build log to branch (debug)
-        if: always() && steps.build.outcome == 'failure'
+      - name: Commit debug log to branch
+        if: always()
         run: |
-          tail -250 /tmp/build.log > _build_log.txt 2>/dev/null || echo "No build log captured" > _build_log.txt
+          {
+            echo "=== BUILD STEP OUTCOME: ${{ steps.build.outcome }} ==="
+            echo ""
+            echo "=== BUILD LOG ==="
+            cat /tmp/build.log 2>/dev/null || echo "NO BUILD LOG (build step was skipped or log missing)"
+          } > _build_log.txt
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
           git add _build_log.txt
-          git diff --staged --quiet || git commit -m "CI debug: build log [skip ci]"
-          git push origin HEAD:claude/whatsapp-sticker-uploader-qzR5l || true
+          git diff --staged --quiet && echo "No changes" || git commit -m "CI debug: log [skip ci]"
+          git push origin HEAD:claude/whatsapp-sticker-uploader-qzR5l
 
       - name: Fail if build failed
         if: always() && steps.build.outcome == 'failure'
