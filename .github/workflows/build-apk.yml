@@ -19,14 +19,20 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Configure Android SDK path
+      - name: Accept Android SDK licenses and install components
+        run: |
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-34" \
+            "build-tools;34.0.0" > /dev/null 2>&1 || true
+
+      - name: Configure local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > whatsapp-sticker-uploader/local.properties
 
-      - name: Grant execute permission to gradlew
-        run: chmod +x whatsapp-sticker-uploader/gradlew
-
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1
         working-directory: whatsapp-sticker-uploader
 
       - name: Upload APK
