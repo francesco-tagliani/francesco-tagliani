@@ -19,14 +19,14 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Configure local.properties
-        run: |
-          SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          echo "sdk.dir=$SDK_DIR" > whatsapp-sticker-uploader/local.properties
-          echo "Android SDK: $SDK_DIR"
+        run: echo "sdk.dir=$ANDROID_HOME" > whatsapp-sticker-uploader/local.properties
+
+      - name: Accept Android SDK licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+
+      - name: Install required SDK components
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" || true
 
       - name: Build debug APK
         run: |
@@ -34,7 +34,7 @@ jobs:
           ./gradlew assembleDebug --no-daemon --stacktrace
         working-directory: whatsapp-sticker-uploader
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: WhatsAppStickerUploader-debug-apk
