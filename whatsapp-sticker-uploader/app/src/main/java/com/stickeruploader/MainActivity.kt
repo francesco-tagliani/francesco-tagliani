@@ -3,8 +3,11 @@ package com.stickeruploader
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,15 +23,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: StickerPackAdapter
     private val stickerPacks = mutableListOf<StickerPack>()
+    private var waitingForManageStoragePermission = false
 
-    // Codice risultato per aggiunta pack a WhatsApp
     private val ADD_PACK_REQUEST_CODE = 200
 
-    // Launcher per richiesta permessi
     private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val granted = permissions.values.any { it }
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
         if (granted) {
             loadStickers()
         } else {
@@ -46,6 +47,17 @@ class MainActivity : AppCompatActivity() {
         checkPermissionsAndLoad()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Controlla se MANAGE_EXTERNAL_STORAGE è stato concesso dopo il ritorno dalle Impostazioni
+        if (waitingForManageStoragePermission &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            Environment.isExternalStorageManager()) {
+            waitingForManageStoragePermission = false
+            loadStickers()
+        }
+    }
+
     private fun setupRecyclerView() {
         adapter = StickerPackAdapter(stickerPacks) { pack ->
             addPackToWhatsApp(pack)
@@ -55,7 +67,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupButtons() {
-        // Pulsante "Aggiungi TUTTI i pack"
         binding.btnAddAll.setOnClickListener {
             val remaining = stickerPacks.filter { !it.isAddedToWhatsApp }
             if (remaining.isEmpty()) {
@@ -72,34 +83,50 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
-        // Pulsante ricarica
         binding.btnReload.setOnClickListener {
-            loadStickers()
+            checkPermissionsAndLoad()
         }
     }
 
     private fun checkPermissionsAndLoad() {
-        val permissionsNeeded = mutableListOf<String>()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13+: usa READ_MEDIA_IMAGES
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES)
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionsNeeded.add(Manifest.permission.READ_MEDIA_IMAGES)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+: serve MANAGE_EXTERNAL_STORAGE per leggere Android/media/com.whatsapp/
+            if (!Environment.isExternalStorageManager()) {
+                showManageStorageDialog()
+                return
             }
         } else {
-            // Android 12 e inferiori: usa READ_EXTERNAL_STORAGE
+            // Android 10 e inferiori: READ_EXTERNAL_STORAGE è sufficiente
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
-                permissionsNeeded.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+                permissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                return
             }
         }
+        loadStickers()
+    }
 
-        if (permissionsNeeded.isEmpty()) {
-            loadStickers()
-        } else {
-            permissionLauncher.launch(permissionsNeeded.toTypedArray())
-        }
+    private fun showManageStorageDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Accesso ai file richiesto")
+            .setMessage("Per leggere gli sticker WhatsApp da:\n\n${StickerPackLoader.STICKER_DIR.absolutePath}\n\nserve il permesso 'Accesso a tutti i file'.\n\nTocca OK → attiva l'interruttore per Sticker Uploader → torna all'app.")
+            .setPositiveButton("Apri Impostazioni") { _, _ ->
+                waitingForManageStoragePermission = true
+                try {
+                    startActivity(
+                        Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                            data = Uri.fromParts("package", packageName, null)
+                        }
+                    )
+                } catch (e: Exception) {
+                    startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                }
+            }
+            .setNegativeButton("Annulla") { _, _ ->
+                binding.tvStatus.text =
+                    "Permesso necessario.\nPremi 'Ricarica' dopo averlo concesso in Impostazioni → App → Sticker Uploader → Accesso speciale → Accesso a tutti i file."
+            }
+            .show()
     }
 
     private fun loadStickers() {
@@ -107,7 +134,6 @@ class MainActivity : AppCompatActivity() {
         binding.tvStatus.text = "Caricamento sticker in corso..."
         binding.recyclerView.visibility = View.GONE
 
-        // Carica in background
         Thread {
             val packs = StickerPackLoader.loadAllPacks()
             runOnUiThread {
@@ -119,7 +145,8 @@ class MainActivity : AppCompatActivity() {
 
                 if (packs.isEmpty()) {
                     val path = StickerPackLoader.STICKER_DIR.absolutePath
-                    binding.tvStatus.text = "Nessun file .webp trovato in:\n$path\n\nAssicurati che la cartella esista e contenga file .webp"
+                    binding.tvStatus.text =
+                        "Nessun file .webp trovato in:\n$path\n\nAssicurati che la cartella esista e contenga file .webp"
                     binding.btnAddAll.isEnabled = false
                 } else {
                     val totalStickers = packs.sumOf { it.stickers.size }
@@ -130,9 +157,6 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /**
-     * Aggiunge un singolo pack a WhatsApp tramite l'API ufficiale (Intent).
-     */
     private fun addPackToWhatsApp(pack: StickerPack) {
         val intent = Intent().apply {
             action = "com.whatsapp.intent.action.ENABLE_STICKER_PACK"
@@ -140,17 +164,12 @@ class MainActivity : AppCompatActivity() {
             putExtra("sticker_pack_authority", StickerContentProvider.AUTHORITY)
             putExtra("sticker_pack_name", pack.name)
         }
-
         try {
+            @Suppress("DEPRECATION")
             startActivityForResult(intent, ADD_PACK_REQUEST_CODE)
-            // Salva quale pack stiamo aggiungendo per gestire il risultato
             pendingPackId = pack.identifier
         } catch (e: Exception) {
-            Toast.makeText(
-                this,
-                "WhatsApp non trovato o errore: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
+            Toast.makeText(this, "WhatsApp non trovato o errore: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -158,9 +177,6 @@ class MainActivity : AppCompatActivity() {
     private var batchPacksToAdd: List<StickerPack> = emptyList()
     private var batchCurrentIndex: Int = 0
 
-    /**
-     * Aggiunge i pack uno alla volta (l'utente deve confermare ogni pack in WhatsApp).
-     */
     private fun addAllPacksSequentially(packs: List<StickerPack>, startIndex: Int) {
         if (startIndex >= packs.size) {
             Toast.makeText(this, "Tutti i pack sono stati aggiunti!", Toast.LENGTH_SHORT).show()
@@ -171,18 +187,16 @@ class MainActivity : AppCompatActivity() {
         addPackToWhatsApp(packs[startIndex])
     }
 
-    @Deprecated("Needed for WhatsApp sticker API")
+    @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == ADD_PACK_REQUEST_CODE) {
             val packId = pendingPackId
             if (resultCode == RESULT_OK && packId != null) {
                 adapter.markAsAdded(packId)
-                // Se siamo in modalità "aggiungi tutti", continua con il prossimo
                 if (batchPacksToAdd.isNotEmpty()) {
                     batchCurrentIndex++
                     if (batchCurrentIndex < batchPacksToAdd.size) {
-                        // Piccola pausa prima del prossimo pack
                         binding.recyclerView.postDelayed({
                             addAllPacksSequentially(batchPacksToAdd, batchCurrentIndex)
                         }, 500)
@@ -192,7 +206,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } else if (resultCode == RESULT_CANCELED) {
-                Toast.makeText(this, "Aggiunta annullata dall'utente", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Aggiunta annullata", Toast.LENGTH_SHORT).show()
                 batchPacksToAdd = emptyList()
             }
             pendingPackId = null
@@ -202,10 +216,10 @@ class MainActivity : AppCompatActivity() {
     private fun showPermissionDeniedDialog() {
         AlertDialog.Builder(this)
             .setTitle("Permesso necessario")
-            .setMessage("L'app ha bisogno del permesso per leggere i file dalla memoria del dispositivo.\n\nVai in Impostazioni → App → Sticker Uploader → Permessi e abilita l'accesso alla memoria.")
+            .setMessage("L'app ha bisogno del permesso storage per leggere gli sticker.")
             .setPositiveButton("Riprova") { _, _ -> checkPermissionsAndLoad() }
             .setNegativeButton("Annulla") { _, _ ->
-                binding.tvStatus.text = "Permesso negato. L'app non può leggere gli sticker."
+                binding.tvStatus.text = "Permesso negato."
             }
             .show()
     }

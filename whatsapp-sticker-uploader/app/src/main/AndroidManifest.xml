@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Permessi per leggere i file degli sticker dalla memoria -->
+    <!-- Android 10 e inferiori -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+        android:maxSdkVersion="29" />
+
+    <!-- Android 11+ (API 30+): accesso completo necessario per Android/media/com.whatsapp/ -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application
         android:allowBackup="true"
@@ -24,18 +26,12 @@
             </intent-filter>
         </activity>
 
-        <!--
-            ContentProvider richiesto dall'API ufficiale WhatsApp Sticker Pack.
-            L'authority DEVE corrispondere all'applicationId + ".stickercontentprovider"
-            oppure un valore personalizzato dichiarato anche nelle meta-data dell'app.
-        -->
         <provider
             android:name=".StickerContentProvider"
             android:authorities="com.stickeruploader.stickercontentprovider"
             android:exported="true"
             android:readPermission="com.whatsapp.permission.STICKER_PROVIDER_READ" />
 
-        <!-- Meta-data richiesti dall'API WhatsApp -->
         <meta-data
             android:name="content_provider_authority"
             android:value="com.stickeruploader.stickercontentprovider" />
