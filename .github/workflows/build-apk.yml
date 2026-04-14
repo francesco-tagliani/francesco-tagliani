@@ -20,29 +20,62 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Show Android SDK info
+      - name: Android SDK diagnostics
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls "$ANDROID_HOME/platforms/" 2>/dev/null || echo "No platforms dir"
-          ls "$ANDROID_HOME/build-tools/" 2>/dev/null || echo "No build-tools dir"
+          echo "SDK at /usr/local/lib/android/sdk:"
+          ls /usr/local/lib/android/sdk/platforms/ 2>/dev/null || echo "No platforms dir"
+          ls /usr/local/lib/android/sdk/build-tools/ 2>/dev/null || echo "No build-tools dir"
+          java -version 2>&1
 
       - name: Accept SDK licenses
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses 2>/dev/null || true
-
-      - name: Install platform-34 and build-tools-34
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-34" "build-tools;34.0.0" 2>&1 || true
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+
+      - name: Install platform-33 and build-tools-33
+        run: |
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-33" "build-tools;33.0.2" 2>&1 | tail -5
+          echo "Platforms after install:"
+          ls /usr/local/lib/android/sdk/platforms/
 
       - name: Write local.properties
-        run: printf 'sdk.dir=%s\n' "$ANDROID_HOME" > whatsapp-sticker-uploader/local.properties
+        run: |
+          echo "sdk.dir=/usr/local/lib/android/sdk" > whatsapp-sticker-uploader/local.properties
+          cat whatsapp-sticker-uploader/local.properties
 
       - name: Build debug APK
+        id: build
+        continue-on-error: true
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
         working-directory: whatsapp-sticker-uploader
+
+      - name: Write build log to summary
+        if: always()
+        run: |
+          {
+            echo "## Build outcome: ${{ steps.build.outcome }}"
+            echo "## Last 150 lines of build output"
+            echo '```'
+            tail -150 /tmp/build.log 2>/dev/null || echo "No build log captured"
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: /tmp/build.log
+          if-no-files-found: ignore
+
+      - name: Fail if build failed
+        if: steps.build.outcome == 'failure'
+        run: |
+          echo "Build failed. See build-log artifact or job summary above."
+          exit 1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
