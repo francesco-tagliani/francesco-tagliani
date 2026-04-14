@@ -8,6 +8,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -35,14 +38,12 @@ jobs:
 
       - name: Ensure platform-33 is available
         run: |
-          # Try to install (may already be present)
           /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager \
             "platforms;android-33" "build-tools;33.0.2" 2>&1 | tail -10 || true
-          # Verify it's actually available
           if [ -d "/usr/local/lib/android/sdk/platforms/android-33" ]; then
-            echo "OK: android-33 is available"
+            echo "OK: android-33 available"
           else
-            echo "WARN: android-33 not found, listing what is available:"
+            echo "WARN: android-33 not found, platforms present:"
             ls /usr/local/lib/android/sdk/platforms/ 2>/dev/null
           fi
 
@@ -60,7 +61,7 @@ jobs:
         working-directory: whatsapp-sticker-uploader
 
       - name: Post failure log as PR comment
-        if: failure() || steps.build.outcome == 'failure'
+        if: always() && (failure() || steps.build.outcome == 'failure')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -69,17 +70,17 @@ jobs:
             echo ""
             echo "Build step outcome: ${{ steps.build.outcome }}"
             echo ""
-            echo "Last 100 lines of Gradle output:"
+            echo "Last 120 lines of Gradle output:"
             echo '```'
-            tail -100 /tmp/build.log 2>/dev/null || echo "No build output (failure before build step)"
+            tail -120 /tmp/build.log 2>/dev/null || echo "No build output (failure before build step)"
             echo '```'
           } > /tmp/comment.md
           gh pr comment 1 \
             --repo francesco-tagliani/francesco-tagliani \
-            --body-file /tmp/comment.md
+            --body-file /tmp/comment.md || true
 
       - name: Fail if build failed
-        if: steps.build.outcome == 'failure'
+        if: always() && steps.build.outcome == 'failure'
         run: exit 1
 
       - name: Upload APK
