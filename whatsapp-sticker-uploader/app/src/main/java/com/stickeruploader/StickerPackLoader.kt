@@ -49,7 +49,7 @@ object StickerPackLoader {
             }
             StickerPack(
                 identifier = "my_sticker_pack_%03d".format(packNumber),
-                name = "I miei Sticker - Pack $packNumber",
+                name = "New Stiker $packNumber",
                 publisher = "Il mio dispositivo",
                 trayImageFile = files.first().name,
                 stickers = stickers
