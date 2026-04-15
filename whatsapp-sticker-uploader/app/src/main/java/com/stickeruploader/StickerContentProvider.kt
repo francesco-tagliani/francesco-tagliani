@@ -3,7 +3,6 @@ package com.stickeruploader
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.UriMatcher
-import android.content.res.AssetFileDescriptor
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.graphics.Bitmap
@@ -33,7 +32,7 @@ class StickerContentProvider : ContentProvider() {
             addURI(AUTHORITY, "stickers_asset/*/*", STICKERS_ASSET)
         }
 
-        // Nomi esatti colonne richiesti da WhatsApp (da codice ufficiale WhatsApp/stickers)
+        // Nomi colonne ESATTI dal codice sorgente ufficiale WhatsApp/stickers
         private val METADATA_COLUMNS = arrayOf(
             "sticker_pack_identifier",
             "sticker_pack_name",
@@ -50,7 +49,7 @@ class StickerContentProvider : ContentProvider() {
             "animated_sticker_pack"
         )
 
-        // Nomi esatti colonne sticker (da codice ufficiale WhatsApp/stickers)
+        // Nomi colonne ESATTI per gli sticker
         private val STICKER_COLUMNS = arrayOf(
             "sticker_file_name",
             "sticker_emoji",
@@ -95,7 +94,8 @@ class StickerContentProvider : ContentProvider() {
         }
     }
 
-    override fun openAssetFile(uri: Uri, mode: String): AssetFileDescriptor? {
+    // Usa openFile() che è il metodo base - più compatibile con WhatsApp
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         return when (URI_MATCHER.match(uri)) {
             STICKERS_ASSET -> {
                 val segments = uri.pathSegments
@@ -115,8 +115,7 @@ class StickerContentProvider : ContentProvider() {
                     sourceFile
                 }
 
-                val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-                AssetFileDescriptor(pfd, 0, file.length())
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             }
             else -> throw FileNotFoundException("URI non supportato: $uri")
         }
@@ -141,16 +140,15 @@ class StickerContentProvider : ContentProvider() {
 
     private fun getStickersForPack(packId: String, uri: Uri): Cursor {
         val cursor = MatrixCursor(STICKER_COLUMNS)
-        val pack = packsCache.find { it.identifier == packId } ?: run {
-            context?.let { cursor.setNotificationUri(it.contentResolver, uri) }
-            return cursor
-        }
-        for (sticker in pack.stickers) {
-            cursor.addRow(arrayOf(
-                sticker.imageFileName,
-                sticker.emojis.joinToString(","),
-                ""
-            ))
+        val pack = packsCache.find { it.identifier == packId }
+        if (pack != null) {
+            for (sticker in pack.stickers) {
+                cursor.addRow(arrayOf(
+                    sticker.imageFileName,
+                    sticker.emojis.joinToString(","),
+                    ""  // sticker_accessibility_text
+                ))
+            }
         }
         context?.let { cursor.setNotificationUri(it.contentResolver, uri) }
         return cursor
@@ -158,22 +156,28 @@ class StickerContentProvider : ContentProvider() {
 
     private fun packToRow(pack: StickerPack): Array<Any?> {
         return arrayOf(
-            pack.identifier,           // sticker_pack_identifier
-            pack.name,                 // sticker_pack_name
-            pack.publisher,            // sticker_pack_publisher
-            pack.trayImageFile,        // sticker_pack_icon (nome file, non URI)
-            "",                        // android_play_store_link
-            "",                        // ios_app_download_link
-            "",                        // sticker_pack_publisher_email
-            "",                        // sticker_pack_publisher_website
-            "",                        // sticker_pack_privacy_policy_website
-            "",                        // sticker_pack_license_agreement_website
-            "1",                       // image_data_version (stringa non-null non-empty)
-            0,                         // whatsapp_will_not_cache_stickers (int 0/1)
-            0                          // animated_sticker_pack (int 0/1)
+            pack.identifier,
+            pack.name,
+            pack.publisher,
+            pack.trayImageFile,
+            "",   // android_play_store_link
+            "",   // ios_app_download_link
+            "",   // sticker_pack_publisher_email
+            "",   // sticker_pack_publisher_website
+            "",   // sticker_pack_privacy_policy_website
+            "",   // sticker_pack_license_agreement_website
+            "1",  // image_data_version (stringa non vuota)
+            0,    // whatsapp_will_not_cache_stickers (int)
+            0     // animated_sticker_pack (int)
         )
     }
 
+    /**
+     * Crea (e cachea) la tray image a 96×96 pixel.
+     * WhatsApp richiede ESATTAMENTE 96×96 e max 50KB.
+     * Se BitmapFactory non riesce a decodificare il file sorgente,
+     * crea un bitmap grigio solido come fallback — garantisce sempre 96×96.
+     */
     private fun getOrCreateTrayImage(packId: String, sourceFile: File): File {
         val ctx = context ?: return sourceFile
         val trayDir = File(ctx.cacheDir, "tray_images")
@@ -182,22 +186,48 @@ class StickerContentProvider : ContentProvider() {
 
         if (trayFile.exists() && trayFile.length() > 0) return trayFile
 
+        // Prova a decodificare il file sorgente; se fallisce usa un bitmap grigio
+        val sourceBitmap: Bitmap = try {
+            BitmapFactory.decodeFile(sourceFile.absolutePath)
+                ?: Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
+        } catch (e: Exception) {
+            Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
+        }
+
         return try {
-            val bitmap = BitmapFactory.decodeFile(sourceFile.absolutePath) ?: return sourceFile
-            val scaled = Bitmap.createScaledBitmap(bitmap, 96, 96, true)
-            bitmap.recycle()
+            // Scala SEMPRE a 96×96
+            val scaled = Bitmap.createScaledBitmap(sourceBitmap, 96, 96, true)
+            if (sourceBitmap !== scaled) sourceBitmap.recycle()
+
             FileOutputStream(trayFile).use { fos ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 90, fos)
+                    scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, fos)
                 } else {
                     @Suppress("DEPRECATION")
-                    scaled.compress(Bitmap.CompressFormat.WEBP, 90, fos)
+                    scaled.compress(Bitmap.CompressFormat.WEBP, 80, fos)
                 }
             }
             scaled.recycle()
-            trayFile
+
+            // Verifica che il file sia stato scritto correttamente
+            if (trayFile.exists() && trayFile.length() > 0) trayFile else sourceFile
         } catch (e: Exception) {
-            sourceFile
+            // Ultimo fallback: prova a creare un bitmap minimo da zero
+            try {
+                val fallback = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
+                FileOutputStream(trayFile).use { fos ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        fallback.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, fos)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        fallback.compress(Bitmap.CompressFormat.WEBP, 80, fos)
+                    }
+                }
+                fallback.recycle()
+                if (trayFile.exists() && trayFile.length() > 0) trayFile else sourceFile
+            } catch (e2: Exception) {
+                sourceFile
+            }
         }
     }
 

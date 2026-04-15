@@ -4,15 +4,13 @@ import android.os.Environment
 import com.stickeruploader.models.Sticker
 import com.stickeruploader.models.StickerPack
 import java.io.File
+import java.io.RandomAccessFile
 
 object StickerPackLoader {
 
     const val STICKERS_PER_PACK = 30
+    private const val MAX_STICKER_SIZE_BYTES = 100 * 1024L  // 100KB max per WhatsApp
 
-    /**
-     * Percorso della cartella WhatsApp Stickers nella memoria interna del dispositivo.
-     * Su Android moderni: /storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Stickers
-     */
     val STICKER_DIR: File by lazy {
         File(
             Environment.getExternalStorageDirectory(),
@@ -20,26 +18,30 @@ object StickerPackLoader {
         )
     }
 
-    /**
-     * Carica tutti i file WebP dalla cartella sticker e li raggruppa in pack da 30.
-     * Ritorna la lista di StickerPack.
-     */
     fun loadAllPacks(): List<StickerPack> {
         if (!STICKER_DIR.exists() || !STICKER_DIR.isDirectory) {
             return emptyList()
         }
 
-        // Prendi tutti i file .webp ordinati per nome
-        val stickerFiles = STICKER_DIR.listFiles { file ->
+        val allFiles = STICKER_DIR.listFiles { file ->
             file.isFile && file.name.lowercase().endsWith(".webp")
         }?.sortedBy { it.name } ?: emptyList()
 
-        if (stickerFiles.isEmpty()) return emptyList()
+        // Filtra file non validi per WhatsApp
+        val validFiles = allFiles.filter { file ->
+            val size = file.length()
+            // File deve essere > 0 e <= 100KB
+            size > 0L && size <= MAX_STICKER_SIZE_BYTES && !isAnimatedWebP(file)
+        }
 
-        // Raggruppa in chunk da STICKERS_PER_PACK
-        val chunks = stickerFiles.chunked(STICKERS_PER_PACK)
+        if (validFiles.isEmpty()) return emptyList()
 
-        return chunks.mapIndexed { index, files ->
+        val chunks = validFiles.chunked(STICKERS_PER_PACK)
+
+        return chunks.mapIndexedNotNull { index, files ->
+            // WhatsApp richiede minimo 3 sticker per pack
+            if (files.size < 3) return@mapIndexedNotNull null
+
             val packNumber = index + 1
             val stickers = files.map { file ->
                 Sticker(
@@ -57,10 +59,34 @@ object StickerPackLoader {
         }
     }
 
-    /**
-     * Ritorna il File fisico per uno sticker dato il nome del file.
-     */
     fun getStickerFile(fileName: String): File {
         return File(STICKER_DIR, fileName)
+    }
+
+    /**
+     * Rileva se un file WebP è animato controllando l'header del file.
+     * I WebP animati contengono il chunk "ANIM" nell'header.
+     * WhatsApp rifiuta sticker animati se animated_sticker_pack=0.
+     */
+    private fun isAnimatedWebP(file: File): Boolean {
+        if (file.length() < 20) return false
+        return try {
+            RandomAccessFile(file, "r").use { raf ->
+                val header = ByteArray(50)
+                raf.read(header)
+                // Cerca "ANIM" nei primi 50 byte
+                for (i in 0 until header.size - 3) {
+                    if (header[i] == 'A'.code.toByte() &&
+                        header[i+1] == 'N'.code.toByte() &&
+                        header[i+2] == 'I'.code.toByte() &&
+                        header[i+3] == 'M'.code.toByte()) {
+                        return true
+                    }
+                }
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 }
