@@ -8,6 +8,12 @@
     <!-- Android 11+ (API 30+): accesso completo necessario per Android/media/com.whatsapp/ -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
+    <!-- Necessario su Android 11+ per verificare se WhatsApp è installato -->
+    <queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
