@@ -24,7 +24,7 @@ object StickerPackLoader {
         }
 
         val allFiles = STICKER_DIR.listFiles { file ->
-            file.isFile && file.name.lowercase().endsWith(".webp")
+            file.isFile && file.name.toLowerCase().endsWith(".webp")
         }?.sortedBy { it.name } ?: emptyList()
 
         // Filtra file non validi per WhatsApp
@@ -76,10 +76,10 @@ object StickerPackLoader {
                 raf.read(header)
                 // Cerca "ANIM" nei primi 50 byte
                 for (i in 0 until header.size - 3) {
-                    if (header[i] == 'A'.code.toByte() &&
-                        header[i+1] == 'N'.code.toByte() &&
-                        header[i+2] == 'I'.code.toByte() &&
-                        header[i+3] == 'M'.code.toByte()) {
+                    if (header[i] == 65.toByte() &&  // 'A'
+                        header[i+1] == 78.toByte() && // 'N'
+                        header[i+2] == 73.toByte() && // 'I'
+                        header[i+3] == 77.toByte()) { // 'M'
                         return true
                     }
                 }

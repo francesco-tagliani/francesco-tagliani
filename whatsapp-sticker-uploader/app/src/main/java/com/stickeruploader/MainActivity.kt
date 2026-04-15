@@ -1,68 +1,78 @@
 package com.stickeruploader
 
+import android.app.Activity
+import android.app.ListActivity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.ListAdapter
+import android.widget.ListView
+import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.LinearLayoutManager
-import com.stickeruploader.databinding.ActivityMainBinding
 import com.stickeruploader.models.StickerPack
 import java.io.File
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
 
     companion object {
         private const val TAG = "MainActivity"
     }
 
-    private lateinit var binding: ActivityMainBinding
+    private lateinit var listView: ListView
+    private lateinit var tvStatus: TextView
+    private lateinit var btnReload: Button
+    private lateinit var btnAddAll: Button
     private val executor: Executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var allPacks: List<StickerPack> = emptyList()
-    private lateinit var adapter: StickerPackAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d(TAG, "onCreate() chiamato")
 
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        setContentView(R.layout.activity_main)
 
-        setupRecyclerView()
+        // Find views
+        listView = findViewById(R.id.list)
+        tvStatus = findViewById(R.id.tvStatus)
+        btnReload = findViewById(R.id.btnReload)
+        btnAddAll = findViewById(R.id.btnAddAll)
+
         setupButtons()
         checkWhatsAppInstalled()
-
         loadStickers()
-    }
-
-    private fun setupRecyclerView() {
-        Log.d(TAG, "setupRecyclerView() chiamato")
-        adapter = StickerPackAdapter(emptyList()) { pack ->
-            addPackToWhatsApp(pack)
-        }
-        binding.recyclerView.layoutManager = LinearLayoutManager(this)
-        binding.recyclerView.adapter = adapter
     }
 
     private fun setupButtons() {
         Log.d(TAG, "setupButtons() chiamato")
 
-        binding.btnReload.setOnClickListener {
+        btnReload.setOnClickListener {
             Log.d(TAG, "btnReload cliccato")
             loadStickers()
         }
 
-        binding.btnAddAll.setOnClickListener {
+        btnAddAll.setOnClickListener {
             Log.d(TAG, "btnAddAll cliccato, aggiungendo ${allPacks.size} pack")
             for (pack in allPacks) {
+                addPackToWhatsApp(pack)
+            }
+        }
+
+        listView.onItemClickListener = AdapterView.OnItemClickListener { parent, view, position, id ->
+            if (position < allPacks.size) {
+                val pack = allPacks[position]
+                Log.d(TAG, "Pack cliccato: ${pack.identifier}")
                 addPackToWhatsApp(pack)
             }
         }
@@ -89,9 +99,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadStickers() {
         Log.d(TAG, "loadStickers() iniziato")
-        binding.progressBar.visibility = View.VISIBLE
-        binding.recyclerView.visibility = View.GONE
-        binding.tvStatus.text = "Caricamento sticker..."
+        tvStatus.text = "Caricamento sticker..."
+        btnReload.isEnabled = false
+        btnAddAll.isEnabled = false
 
         executor.execute {
             try {
@@ -121,21 +131,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUI(packs: List<StickerPack>) {
         Log.d(TAG, "updateUI() con ${packs.size} pack")
-        binding.progressBar.visibility = View.GONE
-        binding.recyclerView.visibility = View.VISIBLE
-        binding.tvStatus.text = "${packs.size} pack trovati"
-        binding.btnAddAll.isEnabled = true
+        tvStatus.text = "${packs.size} pack trovati"
+        btnReload.isEnabled = true
+        btnAddAll.isEnabled = true
 
-        adapter = StickerPackAdapter(packs) { pack ->
-            addPackToWhatsApp(pack)
-        }
-        binding.recyclerView.adapter = adapter
+        // Create list adapter with pack names
+        val packNames = packs.map { "${it.name} (${it.stickers.size} sticker)" }.toTypedArray()
+        val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, packNames)
+        listView.adapter = adapter
     }
 
     private fun addPackToWhatsApp(pack: StickerPack) {
         Log.d(TAG, "addPackToWhatsApp() per pack: ${pack.identifier}")
-        binding.tvStatus.text = "Copiamento file di '${pack.name}'..."
-        binding.progressBar.visibility = View.VISIBLE
+        tvStatus.text = "Copiamento file di '${pack.name}'..."
 
         executor.execute {
             try {
@@ -150,20 +158,14 @@ class MainActivity : AppCompatActivity() {
                 Log.e(TAG, "Errore durante copia file", e)
                 mainHandler.post {
                     showError("Errore durante copia file: ${e.message}")
-                    binding.progressBar.visibility = View.GONE
                 }
             }
         }
     }
 
-    /**
-     * Copia tutti i file del pack dalla cartella sorgente alla filesDir dell'app.
-     * ContentProvider può servire file solo da filesDir, non da shared storage.
-     */
     private fun copyPackFilesToAppStorage(pack: StickerPack) {
         Log.d(TAG, "copyPackFilesToAppStorage() per ${pack.identifier}")
 
-        // Crea le directory nel filesDir se non esistono
         val stickersDir = File(filesDir, "stickers")
         val trayDir = File(filesDir, "tray_images")
 
@@ -176,7 +178,6 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Directory creata: ${trayDir.absolutePath}")
         }
 
-        // Copia i file sticker
         for (sticker in pack.stickers) {
             val sourceFile = File(StickerPackLoader.STICKER_DIR, sticker.imageFileName)
             val destFile = File(stickersDir, sticker.imageFileName)
@@ -190,7 +191,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Copia tray image (primo sticker come icona del pack)
         val trayImageName = pack.trayImageFile
         val sourceTrayFile = File(StickerPackLoader.STICKER_DIR, trayImageName)
         val destTrayFile = File(trayDir, "${pack.identifier}_tray.webp")
@@ -232,19 +232,16 @@ class MainActivity : AppCompatActivity() {
         try {
             startActivity(intent)
             Log.d(TAG, "Intent inviato con successo")
-            binding.progressBar.visibility = View.GONE
-            binding.tvStatus.text = "Intent inviato a WhatsApp per ${pack.name}"
+            tvStatus.text = "Intent inviato a WhatsApp per ${pack.name}"
         } catch (e: Exception) {
             Log.e(TAG, "Errore invio intent", e)
             showError("Errore invio intent: ${e.message}")
-            binding.progressBar.visibility = View.GONE
         }
     }
 
     private fun showError(message: String) {
         Log.e(TAG, "Errore mostrato: $message")
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-        binding.tvStatus.text = "Errore: $message"
-        binding.progressBar.visibility = View.GONE
+        tvStatus.text = "Errore: $message"
     }
 }
