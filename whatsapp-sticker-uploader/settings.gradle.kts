@@ -1,17 +1,15 @@
 pluginManagement {
     repositories {
         gradlePluginPortal()
-        maven(url = "https://maven.aliyun.com/repository/public")
         mavenCentral()
-        google()
+        maven(url = "https://repo.maven.apache.org/maven2")
     }
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven(url = "https://maven.aliyun.com/repository/public")
         mavenCentral()
-        google()
+        maven(url = "https://repo.maven.apache.org/maven2")
     }
 }
 
