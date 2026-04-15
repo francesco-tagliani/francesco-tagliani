@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Android 10 e inferiori -->
+    <!-- Android 10 e inferiori: lettura storage -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
+    <!-- Android 9 e inferiori: scrittura per il file di log nella cartella Download -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <!-- Android 11+ (API 30+): accesso completo necessario per Android/media/com.whatsapp/ -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />

@@ -2,6 +2,7 @@ package com.stickeruploader
 
 import android.content.Context
 import android.os.Build
+import android.os.Environment
 import android.util.Log
 import java.io.File
 import java.io.FileWriter
@@ -11,21 +12,26 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Scrive log sia su logcat che su file leggibile dall'utente.
- * File salvato in: /storage/emulated/0/Android/data/com.stickeruploader/files/sticker_log.txt
- * (accessibile da qualsiasi file manager)
+ * Scrive log sia su logcat che su file nella cartella Download.
+ * File salvato in: /storage/emulated/0/Download/StickerUploaderLog.txt
+ * (visibile in qualsiasi file manager → Download)
  */
 object AppLogger {
 
     private const val TAG = "StickerApp"
-    private const val LOG_FILE_NAME = "sticker_log.txt"
+    private const val LOG_FILE_NAME = "StickerUploaderLog.txt"
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
 
     private var logFile: File? = null
 
     fun init(context: Context) {
-        // Usa externalFilesDir così il file è leggibile da file manager
-        val dir = context.getExternalFilesDir(null) ?: context.filesDir
+        // Salva nella cartella Download pubblica, sempre visibile dal file manager
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val dir = if (downloadsDir != null && (downloadsDir.exists() || downloadsDir.mkdirs())) {
+            downloadsDir
+        } else {
+            context.getExternalFilesDir(null) ?: context.filesDir
+        }
         logFile = File(dir, LOG_FILE_NAME)
         // Cancella log precedente all'avvio
         logFile?.delete()
