@@ -1,65 +1,51 @@
 package com.stickeruploader
 
-import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.stickeruploader.databinding.ActivityMainBinding
 import com.stickeruploader.models.StickerPack
+import java.io.File
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityMainBinding
-    private lateinit var adapter: StickerPackAdapter
-    private val stickerPacks = mutableListOf<StickerPack>()
-    private var waitingForManageStoragePermission = false
-
-    private val ADD_PACK_REQUEST_CODE = 200
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            loadStickers()
-        } else {
-            showPermissionDeniedDialog()
-        }
+    companion object {
+        private const val TAG = "MainActivity"
     }
+
+    private lateinit var binding: ActivityMainBinding
+    private val executor: Executor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var allPacks: List<StickerPack> = emptyList()
+    private lateinit var adapter: StickerPackAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d(TAG, "onCreate() chiamato")
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         setupRecyclerView()
         setupButtons()
-        checkPermissionsAndLoad()
-    }
+        checkWhatsAppInstalled()
 
-    override fun onResume() {
-        super.onResume()
-        // Controlla se MANAGE_EXTERNAL_STORAGE è stato concesso dopo il ritorno dalle Impostazioni
-        if (waitingForManageStoragePermission &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-            Environment.isExternalStorageManager()) {
-            waitingForManageStoragePermission = false
-            loadStickers()
-        }
+        loadStickers()
     }
 
     private fun setupRecyclerView() {
-        adapter = StickerPackAdapter(stickerPacks) { pack ->
+        Log.d(TAG, "setupRecyclerView() chiamato")
+        adapter = StickerPackAdapter(emptyList()) { pack ->
             addPackToWhatsApp(pack)
         }
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
@@ -67,177 +53,198 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupButtons() {
-        binding.btnAddAll.setOnClickListener {
-            val remaining = stickerPacks.filter { !it.isAddedToWhatsApp }
-            if (remaining.isEmpty()) {
-                Toast.makeText(this, "Tutti i pack sono già stati aggiunti!", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            AlertDialog.Builder(this)
-                .setTitle("Aggiungi tutti i pack")
-                .setMessage("Stai per aggiungere ${remaining.size} pack a WhatsApp (${remaining.sumOf { it.stickers.size }} sticker totali).\n\nPer ogni pack apparirà una finestra di conferma WhatsApp.\n\nVuoi continuare?")
-                .setPositiveButton("Sì, inizia") { _, _ ->
-                    addAllPacksSequentially(remaining, 0)
-                }
-                .setNegativeButton("Annulla", null)
-                .show()
-        }
+        Log.d(TAG, "setupButtons() chiamato")
 
         binding.btnReload.setOnClickListener {
-            checkPermissionsAndLoad()
+            Log.d(TAG, "btnReload cliccato")
+            loadStickers()
+        }
+
+        binding.btnAddAll.setOnClickListener {
+            Log.d(TAG, "btnAddAll cliccato, aggiungendo ${allPacks.size} pack")
+            for (pack in allPacks) {
+                addPackToWhatsApp(pack)
+            }
         }
     }
 
-    private fun checkPermissionsAndLoad() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+: serve MANAGE_EXTERNAL_STORAGE per leggere Android/media/com.whatsapp/
-            if (!Environment.isExternalStorageManager()) {
-                showManageStorageDialog()
-                return
-            }
-        } else {
-            // Android 10 e inferiori: READ_EXTERNAL_STORAGE è sufficiente
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-                return
-            }
+    private fun checkWhatsAppInstalled() {
+        Log.d(TAG, "checkWhatsAppInstalled() chiamato")
+        val isWhatsAppInstalled = isPackageInstalled("com.whatsapp") || isPackageInstalled("com.whatsapp.w4b")
+        Log.d(TAG, "WhatsApp installato: $isWhatsAppInstalled")
+
+        if (!isWhatsAppInstalled) {
+            showError("WhatsApp non è installato")
         }
-        loadStickers()
     }
 
-    private fun showManageStorageDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Accesso ai file richiesto")
-            .setMessage("Per leggere gli sticker WhatsApp da:\n\n${StickerPackLoader.STICKER_DIR.absolutePath}\n\nserve il permesso 'Accesso a tutti i file'.\n\nTocca OK → attiva l'interruttore per Sticker Uploader → torna all'app.")
-            .setPositiveButton("Apri Impostazioni") { _, _ ->
-                waitingForManageStoragePermission = true
-                try {
-                    startActivity(
-                        Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                            data = Uri.fromParts("package", packageName, null)
-                        }
-                    )
-                } catch (e: Exception) {
-                    startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                }
-            }
-            .setNegativeButton("Annulla") { _, _ ->
-                binding.tvStatus.text =
-                    "Permesso necessario.\nPremi 'Ricarica' dopo averlo concesso in Impostazioni → App → Sticker Uploader → Accesso speciale → Accesso a tutti i file."
-            }
-            .show()
+    private fun isPackageInstalled(packageName: String): Boolean {
+        return try {
+            packageManager.getPackageInfo(packageName, 0)
+            true
+        } catch (e: PackageManager.NameNotFoundException) {
+            false
+        }
     }
 
     private fun loadStickers() {
+        Log.d(TAG, "loadStickers() iniziato")
         binding.progressBar.visibility = View.VISIBLE
-        binding.tvStatus.text = "Caricamento sticker in corso..."
         binding.recyclerView.visibility = View.GONE
+        binding.tvStatus.text = "Caricamento sticker..."
 
-        Thread {
-            val packs = StickerPackLoader.loadAllPacks()
-            runOnUiThread {
-                binding.progressBar.visibility = View.GONE
-                stickerPacks.clear()
-                stickerPacks.addAll(packs)
-                adapter.notifyDataSetChanged()
-                binding.recyclerView.visibility = View.VISIBLE
+        executor.execute {
+            try {
+                Log.d(TAG, "loadStickers() caricando pack...")
+                val packs = StickerPackLoader.loadAllPacks()
+                Log.d(TAG, "loadStickers() caricati ${packs.size} pack")
 
-                if (packs.isEmpty()) {
-                    val path = StickerPackLoader.STICKER_DIR.absolutePath
-                    binding.tvStatus.text =
-                        "Nessun file .webp trovato in:\n$path\n\nAssicurati che la cartella esista e contenga file .webp"
-                    binding.btnAddAll.isEnabled = false
-                } else {
-                    val totalStickers = packs.sumOf { it.stickers.size }
-                    binding.tvStatus.text = "Trovati $totalStickers sticker in ${packs.size} pack"
-                    binding.btnAddAll.isEnabled = true
+                allPacks = packs
+
+                mainHandler.post {
+                    if (packs.isEmpty()) {
+                        Log.w(TAG, "Nessun pack trovato")
+                        showError("Nessuno sticker trovato in ${StickerPackLoader.STICKER_DIR.absolutePath}")
+                    } else {
+                        Log.d(TAG, "Aggiornando UI con ${packs.size} pack")
+                        updateUI(packs)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Errore caricamento sticker", e)
+                mainHandler.post {
+                    showError("Errore: ${e.message}")
                 }
             }
-        }.start()
+        }
+    }
+
+    private fun updateUI(packs: List<StickerPack>) {
+        Log.d(TAG, "updateUI() con ${packs.size} pack")
+        binding.progressBar.visibility = View.GONE
+        binding.recyclerView.visibility = View.VISIBLE
+        binding.tvStatus.text = "${packs.size} pack trovati"
+        binding.btnAddAll.isEnabled = true
+
+        adapter = StickerPackAdapter(packs) { pack ->
+            addPackToWhatsApp(pack)
+        }
+        binding.recyclerView.adapter = adapter
     }
 
     private fun addPackToWhatsApp(pack: StickerPack) {
-        // Mostra progresso mentre copiamo i file nella directory privata dell'app
+        Log.d(TAG, "addPackToWhatsApp() per pack: ${pack.identifier}")
+        binding.tvStatus.text = "Copiamento file di '${pack.name}'..."
         binding.progressBar.visibility = View.VISIBLE
-        binding.tvStatus.text = "Preparazione ${pack.name}..."
 
-        Thread {
-            // CRITICO: copia i file nella directory privata PRIMA di inviare l'intent.
-            // Il ContentProvider può servire file SOLO dalla directory privata dell'app
-            // quando viene chiamato da WhatsApp via IPC (scoped storage Android 10+).
-            StickerFileCache.preparePack(applicationContext, pack)
+        executor.execute {
+            try {
+                Log.d(TAG, "Copiamento file del pack ${pack.identifier}")
+                copyPackFilesToAppStorage(pack)
 
-            runOnUiThread {
-                binding.progressBar.visibility = View.GONE
-                val total = stickerPacks.sumOf { it.stickers.size }
-                binding.tvStatus.text = "Trovati $total sticker in ${stickerPacks.size} pack"
-
-                val intent = Intent().apply {
-                    action = "com.whatsapp.intent.action.ENABLE_STICKER_PACK"
-                    putExtra("sticker_pack_id", pack.identifier)
-                    putExtra("sticker_pack_authority", StickerContentProvider.AUTHORITY)
-                    putExtra("sticker_pack_name", pack.name)
+                Log.d(TAG, "File copiati, inviando intent a WhatsApp")
+                mainHandler.post {
+                    sendWhatsAppIntent(pack)
                 }
-                try {
-                    @Suppress("DEPRECATION")
-                    startActivityForResult(intent, ADD_PACK_REQUEST_CODE)
-                    pendingPackId = pack.identifier
-                } catch (e: Exception) {
-                    Toast.makeText(this, "WhatsApp non trovato o errore: ${e.message}", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                Log.e(TAG, "Errore durante copia file", e)
+                mainHandler.post {
+                    showError("Errore durante copia file: ${e.message}")
+                    binding.progressBar.visibility = View.GONE
                 }
             }
-        }.start()
-    }
-
-    private var pendingPackId: String? = null
-    private var batchPacksToAdd: List<StickerPack> = emptyList()
-    private var batchCurrentIndex: Int = 0
-
-    private fun addAllPacksSequentially(packs: List<StickerPack>, startIndex: Int) {
-        if (startIndex >= packs.size) {
-            Toast.makeText(this, "Tutti i pack sono stati aggiunti!", Toast.LENGTH_SHORT).show()
-            return
-        }
-        batchPacksToAdd = packs
-        batchCurrentIndex = startIndex
-        addPackToWhatsApp(packs[startIndex])
-    }
-
-    @Suppress("DEPRECATION")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == ADD_PACK_REQUEST_CODE) {
-            val packId = pendingPackId
-            if (resultCode == RESULT_OK && packId != null) {
-                adapter.markAsAdded(packId)
-                if (batchPacksToAdd.isNotEmpty()) {
-                    batchCurrentIndex++
-                    if (batchCurrentIndex < batchPacksToAdd.size) {
-                        binding.recyclerView.postDelayed({
-                            addAllPacksSequentially(batchPacksToAdd, batchCurrentIndex)
-                        }, 500)
-                    } else {
-                        batchPacksToAdd = emptyList()
-                        Toast.makeText(this, "Tutti i pack aggiunti con successo!", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            } else if (resultCode == RESULT_CANCELED) {
-                Toast.makeText(this, "Aggiunta annullata", Toast.LENGTH_SHORT).show()
-                batchPacksToAdd = emptyList()
-            }
-            pendingPackId = null
         }
     }
 
-    private fun showPermissionDeniedDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Permesso necessario")
-            .setMessage("L'app ha bisogno del permesso storage per leggere gli sticker.")
-            .setPositiveButton("Riprova") { _, _ -> checkPermissionsAndLoad() }
-            .setNegativeButton("Annulla") { _, _ ->
-                binding.tvStatus.text = "Permesso negato."
+    /**
+     * Copia tutti i file del pack dalla cartella sorgente alla filesDir dell'app.
+     * ContentProvider può servire file solo da filesDir, non da shared storage.
+     */
+    private fun copyPackFilesToAppStorage(pack: StickerPack) {
+        Log.d(TAG, "copyPackFilesToAppStorage() per ${pack.identifier}")
+
+        // Crea le directory nel filesDir se non esistono
+        val stickersDir = File(filesDir, "stickers")
+        val trayDir = File(filesDir, "tray_images")
+
+        if (!stickersDir.exists()) {
+            stickersDir.mkdirs()
+            Log.d(TAG, "Directory creata: ${stickersDir.absolutePath}")
+        }
+        if (!trayDir.exists()) {
+            trayDir.mkdirs()
+            Log.d(TAG, "Directory creata: ${trayDir.absolutePath}")
+        }
+
+        // Copia i file sticker
+        for (sticker in pack.stickers) {
+            val sourceFile = File(StickerPackLoader.STICKER_DIR, sticker.imageFileName)
+            val destFile = File(stickersDir, sticker.imageFileName)
+
+            if (!destFile.exists()) {
+                Log.d(TAG, "Copiando sticker: ${sticker.imageFileName}")
+                sourceFile.copyTo(destFile, overwrite = true)
+                Log.d(TAG, "Copiato: ${destFile.absolutePath} (${destFile.length()} bytes)")
+            } else {
+                Log.d(TAG, "Sticker già esiste: ${destFile.absolutePath}")
             }
-            .show()
+        }
+
+        // Copia tray image (primo sticker come icona del pack)
+        val trayImageName = pack.trayImageFile
+        val sourceTrayFile = File(StickerPackLoader.STICKER_DIR, trayImageName)
+        val destTrayFile = File(trayDir, "${pack.identifier}_tray.webp")
+
+        if (sourceTrayFile.exists()) {
+            if (!destTrayFile.exists()) {
+                Log.d(TAG, "Copiando tray image: $trayImageName")
+                sourceTrayFile.copyTo(destTrayFile, overwrite = true)
+                Log.d(TAG, "Copiato tray: ${destTrayFile.absolutePath} (${destTrayFile.length()} bytes)")
+            } else {
+                Log.d(TAG, "Tray image già esiste: ${destTrayFile.absolutePath}")
+            }
+        } else {
+            Log.w(TAG, "Tray image non trovato: ${sourceTrayFile.absolutePath}")
+        }
+
+        Log.d(TAG, "copyPackFilesToAppStorage() completato per ${pack.identifier}")
+    }
+
+    private fun sendWhatsAppIntent(pack: StickerPack) {
+        Log.d(TAG, "sendWhatsAppIntent() per ${pack.identifier}")
+
+        val intent = Intent().apply {
+            action = "com.whatsapp.intent.action.ENABLE_STICKER_PACK"
+            putExtra("sticker_pack_id", pack.identifier)
+            putExtra("sticker_pack_authority", StickerContentProvider.AUTHORITY)
+            putExtra("sticker_pack_name", pack.name)
+            putExtra("sticker_pack_publisher", pack.publisher)
+            putExtra("sticker_pack_animated_emojis", false)
+            putExtra("sticker_pack_preview_emoji_in_chat", "")
+            setPackage("com.whatsapp")
+        }
+
+        Log.d(TAG, "Intent: action=${intent.action}, package=${intent.`package`}")
+        Log.d(TAG, "  sticker_pack_id=${pack.identifier}")
+        Log.d(TAG, "  sticker_pack_authority=${StickerContentProvider.AUTHORITY}")
+        Log.d(TAG, "  sticker_pack_name=${pack.name}")
+
+        try {
+            startActivity(intent)
+            Log.d(TAG, "Intent inviato con successo")
+            binding.progressBar.visibility = View.GONE
+            binding.tvStatus.text = "Intent inviato a WhatsApp per ${pack.name}"
+        } catch (e: Exception) {
+            Log.e(TAG, "Errore invio intent", e)
+            showError("Errore invio intent: ${e.message}")
+            binding.progressBar.visibility = View.GONE
+        }
+    }
+
+    private fun showError(message: String) {
+        Log.e(TAG, "Errore mostrato: $message")
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        binding.tvStatus.text = "Errore: $message"
+        binding.progressBar.visibility = View.GONE
     }
 }

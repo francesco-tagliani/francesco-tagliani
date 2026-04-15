@@ -1,5 +1,6 @@
 package com.stickeruploader
 
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
@@ -11,43 +12,43 @@ class StickerPackAdapter(
     private val onAddClick: (StickerPack) -> Unit
 ) : RecyclerView.Adapter<StickerPackAdapter.ViewHolder>() {
 
-    inner class ViewHolder(private val binding: ItemStickerPackBinding) :
-        RecyclerView.ViewHolder(binding.root) {
-
-        fun bind(pack: StickerPack) {
-            binding.tvPackName.text = pack.name
-            binding.tvPackInfo.text = "${pack.stickers.size} sticker"
-            binding.tvPackId.text = pack.identifier
-
-            if (pack.isAddedToWhatsApp) {
-                binding.btnAdd.text = "Aggiunto ✓"
-                binding.btnAdd.isEnabled = false
-            } else {
-                binding.btnAdd.text = "Aggiungi a WhatsApp"
-                binding.btnAdd.isEnabled = true
-                binding.btnAdd.setOnClickListener { onAddClick(pack) }
-            }
-        }
+    companion object {
+        private const val TAG = "StickerPackAdapter"
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val binding = ItemStickerPackBinding.inflate(
-            LayoutInflater.from(parent.context), parent, false
+            LayoutInflater.from(parent.context),
+            parent,
+            false
         )
-        return ViewHolder(binding)
+        return ViewHolder(binding, onAddClick)
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        holder.bind(packs[position])
+        val pack = packs[position]
+        Log.d(TAG, "onBindViewHolder() posizione=$position, pack=${pack.identifier}")
+        holder.bind(pack)
     }
 
     override fun getItemCount(): Int = packs.size
 
-    fun markAsAdded(packId: String) {
-        val index = packs.indexOfFirst { it.identifier == packId }
-        if (index >= 0) {
-            packs[index].isAddedToWhatsApp = true
-            notifyItemChanged(index)
+    class ViewHolder(
+        private val binding: ItemStickerPackBinding,
+        private val onAddClick: (StickerPack) -> Unit
+    ) : RecyclerView.ViewHolder(binding.root) {
+
+        fun bind(pack: StickerPack) {
+            Log.d(TAG, "bind() pack=${pack.identifier}")
+
+            binding.tvPackName.text = pack.name
+            binding.tvPackId.text = "ID: ${pack.identifier}"
+            binding.tvPackInfo.text = "${pack.stickers.size} sticker"
+
+            binding.btnAdd.setOnClickListener {
+                Log.d(TAG, "btnAdd cliccato per ${pack.identifier}")
+                onAddClick(pack)
+            }
         }
     }
 }

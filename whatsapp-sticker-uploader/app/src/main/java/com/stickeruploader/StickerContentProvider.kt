@@ -8,27 +8,34 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import com.stickeruploader.models.StickerPack
 import java.io.FileNotFoundException
 
+/**
+ * ContentProvider pulito e semplice per WhatsApp sticker.
+ * Serve file da filesDir dell'app (cartella privata, sempre accessibile).
+ *
+ * Log: scrive ogni operazione per il debug
+ */
 class StickerContentProvider : ContentProvider() {
 
     companion object {
         const val AUTHORITY = "com.stickeruploader.stickercontentprovider"
+        private const val TAG = "StickerProvider"
 
         private const val METADATA = 1
-        private const val METADATA_CODE_FOR_SINGLE = 2
+        private const val METADATA_SINGLE = 2
         private const val STICKERS = 3
         private const val STICKERS_ASSET = 4
 
         private val URI_MATCHER = UriMatcher(UriMatcher.NO_MATCH).apply {
             addURI(AUTHORITY, "metadata", METADATA)
-            addURI(AUTHORITY, "metadata/*", METADATA_CODE_FOR_SINGLE)
+            addURI(AUTHORITY, "metadata/*", METADATA_SINGLE)
             addURI(AUTHORITY, "stickers/*", STICKERS)
             addURI(AUTHORITY, "stickers_asset/*/*", STICKERS_ASSET)
         }
 
-        // Nomi colonne ESATTI dal codice sorgente ufficiale WhatsApp/stickers
         private val METADATA_COLUMNS = arrayOf(
             "sticker_pack_identifier",
             "sticker_pack_name",
@@ -53,101 +60,134 @@ class StickerContentProvider : ContentProvider() {
     }
 
     private val packsCache: List<StickerPack> by lazy {
-        StickerPackLoader.loadAllPacks()
+        Log.d(TAG, "Caricando pack dalla cache lazy")
+        val packs = StickerPackLoader.loadAllPacks()
+        Log.d(TAG, "Cache caricata: ${packs.size} pack")
+        packs
     }
 
-    override fun onCreate(): Boolean = true
+    override fun onCreate(): Boolean {
+        Log.d(TAG, "onCreate() chiamato")
+        return true
+    }
 
     override fun getType(uri: Uri): String? {
-        return when (URI_MATCHER.match(uri)) {
-            METADATA -> "vnd.android.cursor.dir/vnd.$AUTHORITY.metadata"
-            METADATA_CODE_FOR_SINGLE -> "vnd.android.cursor.item/vnd.$AUTHORITY.metadata"
+        val type = when (URI_MATCHER.match(uri)) {
+            METADATA, METADATA_SINGLE -> "vnd.android.cursor.dir/vnd.$AUTHORITY.metadata"
             STICKERS -> "vnd.android.cursor.dir/vnd.$AUTHORITY.stickers"
             STICKERS_ASSET -> "image/webp"
             else -> null
         }
+        Log.d(TAG, "getType($uri) = $type")
+        return type
     }
 
-    override fun query(
-        uri: Uri,
-        projection: Array<String>?,
-        selection: String?,
-        selectionArgs: Array<String>?,
-        sortOrder: String?
-    ): Cursor? {
+    override fun query(uri: Uri, projection: Array<String>?, selection: String?, selectionArgs: Array<String>?, sortOrder: String?): Cursor? {
+        Log.d(TAG, "query($uri)")
         return when (URI_MATCHER.match(uri)) {
-            METADATA -> getAllPacksMetadata(uri)
-            METADATA_CODE_FOR_SINGLE -> {
-                val packId = uri.lastPathSegment ?: return null
-                getSinglePackMetadata(packId, uri)
+            METADATA -> {
+                Log.d(TAG, "  -> metadata (tutti i pack)")
+                getAllPacksMetadata()
+            }
+            METADATA_SINGLE -> {
+                val packId = uri.lastPathSegment
+                Log.d(TAG, "  -> metadata singolo: $packId")
+                getSinglePackMetadata(packId ?: "")
             }
             STICKERS -> {
-                val packId = uri.lastPathSegment ?: return null
-                getStickersForPack(packId, uri)
+                val packId = uri.lastPathSegment
+                Log.d(TAG, "  -> stickers per pack: $packId")
+                getStickersForPack(packId ?: "")
             }
-            else -> null
+            else -> {
+                Log.w(TAG, "  -> URI non riconosciuta!")
+                null
+            }
         }
     }
 
     /**
-     * openAssetFile: metodo usato dall'implementazione ufficiale WhatsApp.
-     * Serve i file dalla directory privata dell'app (filesDir/externalFilesDir)
-     * per garantire accesso quando il ContentProvider è avviato da WhatsApp via IPC.
-     * File su /storage/emulated/0/Android/media/com.whatsapp/ NON sono accessibili
-     * al ContentProvider quando chiamato da WhatsApp (scoped storage Android 10+).
+     * openAssetFile: metodo usato da WhatsApp per aprire i file sticker.
+     * Serve i file dalla directory privata dell'app (filesDir).
      */
     override fun openAssetFile(uri: Uri, mode: String): AssetFileDescriptor? {
+        Log.d(TAG, "openAssetFile($uri)")
+
         val segments = uri.pathSegments
-        // URI deve avere esattamente 3 segmenti: stickers_asset/{packId}/{filename}
-        if (segments.size != 3) return null
+        if (segments.size != 3) {
+            Log.w(TAG, "  -> URI malformata: ${segments.size} segmenti invece di 3")
+            return null
+        }
 
         val packId = segments[1]
         val fileName = segments[2]
+        Log.d(TAG, "  -> packId=$packId, fileName=$fileName")
 
-        if (packId.isBlank() || fileName.isBlank()) return null
-
-        val ctx = context ?: return null
-
-        val pack = packsCache.find { it.identifier == packId } ?: return null
-
-        val isTrayImage = pack.trayImageFile == fileName
-
-        val file = if (isTrayImage) {
-            StickerFileCache.getCachedTrayFile(ctx, packId)
-        } else {
-            StickerFileCache.getCachedStickerFile(ctx, fileName)
+        val ctx = context
+        if (ctx == null) {
+            Log.e(TAG, "  -> Context è null!")
+            return null
         }
 
-        if (!file.exists() || file.length() == 0L) return null
+        // Cerca il pack
+        val pack = packsCache.find { it.identifier == packId }
+        if (pack == null) {
+            Log.w(TAG, "  -> Pack non trovato: $packId")
+            return null
+        }
+
+        // Decide se è tray image o sticker
+        val isTrayImage = pack.trayImageFile == fileName
+        Log.d(TAG, "  -> isTrayImage=$isTrayImage")
+
+        // Costruisce il path del file nella directory privata
+        val file = if (isTrayImage) {
+            java.io.File(ctx.filesDir, "tray_images/${packId}_tray.webp")
+        } else {
+            java.io.File(ctx.filesDir, "stickers/$fileName")
+        }
+
+        Log.d(TAG, "  -> cercando file: ${file.absolutePath}")
+        Log.d(TAG, "  -> esiste=${file.exists()}, size=${file.length()}")
+
+        if (!file.exists() || file.length() == 0L) {
+            Log.w(TAG, "  -> File non trovato o vuoto!")
+            return null
+        }
 
         return try {
             val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            Log.d(TAG, "  -> File aperto con successo, size=${file.length()}")
             AssetFileDescriptor(pfd, 0, AssetFileDescriptor.UNKNOWN_LENGTH)
         } catch (e: FileNotFoundException) {
+            Log.e(TAG, "  -> FileNotFoundException: ${e.message}")
             null
         }
     }
 
-    private fun getAllPacksMetadata(uri: Uri): Cursor {
+    private fun getAllPacksMetadata(): Cursor {
         val cursor = MatrixCursor(METADATA_COLUMNS)
+        Log.d(TAG, "getAllPacksMetadata: ${packsCache.size} pack")
         for (pack in packsCache) {
             cursor.addRow(packToRow(pack))
         }
-        context?.let { cursor.setNotificationUri(it.contentResolver, uri) }
         return cursor
     }
 
-    private fun getSinglePackMetadata(packId: String, uri: Uri): Cursor {
+    private fun getSinglePackMetadata(packId: String): Cursor {
         val cursor = MatrixCursor(METADATA_COLUMNS)
         val pack = packsCache.find { it.identifier == packId }
-        if (pack != null) cursor.addRow(packToRow(pack))
-        context?.let { cursor.setNotificationUri(it.contentResolver, uri) }
+        Log.d(TAG, "getSinglePackMetadata($packId): ${if (pack != null) "trovato" else "non trovato"}")
+        if (pack != null) {
+            cursor.addRow(packToRow(pack))
+        }
         return cursor
     }
 
-    private fun getStickersForPack(packId: String, uri: Uri): Cursor {
+    private fun getStickersForPack(packId: String): Cursor {
         val cursor = MatrixCursor(STICKER_COLUMNS)
         val pack = packsCache.find { it.identifier == packId }
+        Log.d(TAG, "getStickersForPack($packId): ${pack?.stickers?.size ?: 0} sticker")
         if (pack != null) {
             for (sticker in pack.stickers) {
                 cursor.addRow(arrayOf(
@@ -157,7 +197,6 @@ class StickerContentProvider : ContentProvider() {
                 ))
             }
         }
-        context?.let { cursor.setNotificationUri(it.contentResolver, uri) }
         return cursor
     }
 
@@ -167,15 +206,15 @@ class StickerContentProvider : ContentProvider() {
             pack.name,
             pack.publisher,
             pack.trayImageFile,
-            "",   // android_play_store_link
-            "",   // ios_app_download_link
-            "",   // sticker_pack_publisher_email
-            "",   // sticker_pack_publisher_website
-            "",   // sticker_pack_privacy_policy_website
-            "",   // sticker_pack_license_agreement_website
-            "1",  // image_data_version
-            0,    // whatsapp_will_not_cache_stickers
-            0     // animated_sticker_pack
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "1",
+            0,
+            0
         )
     }
 

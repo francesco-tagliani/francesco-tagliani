@@ -1,15 +1,17 @@
 pluginManagement {
     repositories {
-        google()
-        mavenCentral()
         gradlePluginPortal()
+        maven(url = "https://maven.aliyun.com/repository/public")
+        mavenCentral()
+        google()
     }
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
+        maven(url = "https://maven.aliyun.com/repository/public")
         mavenCentral()
+        google()
     }
 }
 
