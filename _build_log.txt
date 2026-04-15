@@ -17,9 +17,9 @@ Daemon will be stopped at the end of the build
 > Task :app:preDebugBuild UP-TO-DATE
 > Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
 > Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:dataBindingMergeDependencyArtifactsDebug
 > Task :app:generateDebugResValues
 > Task :app:generateDebugResources
-> Task :app:dataBindingMergeDependencyArtifactsDebug
 > Task :app:packageDebugResources
 > Task :app:parseDebugLocalResources
 > Task :app:mapDebugSourceSetPaths
@@ -31,12 +31,14 @@ Daemon will be stopped at the end of the build
 > Task :app:processDebugManifest
 > Task :app:dataBindingGenBaseClassesDebug
 > Task :app:javaPreCompileDebug
+> Task :app:processDebugManifestForPackage
 > Task :app:mergeDebugShaders
 > Task :app:compileDebugShaders NO-SOURCE
 > Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets
 > Task :app:compressDebugAssets
 > Task :app:checkDebugDuplicateClasses
+> Task :app:processDebugResources
 > Task :app:desugarDebugFileDependencies
 > Task :app:mergeDebugJniLibFolders
 > Task :app:mergeLibDexDebug
@@ -45,8 +47,6 @@ Daemon will be stopped at the end of the build
 > Task :app:validateSigningDebug
 > Task :app:writeDebugAppMetadata
 > Task :app:writeDebugSigningConfigVersions
-> Task :app:processDebugManifestForPackage
-> Task :app:processDebugResources
 > Task :app:mergeExtDexDebug
 > Task :app:compileDebugKotlin
 > Task :app:compileDebugJavaWithJavac
@@ -58,5 +58,5 @@ Daemon will be stopped at the end of the build
 > Task :app:createDebugApkListingFileRedirect
 > Task :app:assembleDebug
 
-BUILD SUCCESSFUL in 32s
+BUILD SUCCESSFUL in 30s
 35 actionable tasks: 35 executed
