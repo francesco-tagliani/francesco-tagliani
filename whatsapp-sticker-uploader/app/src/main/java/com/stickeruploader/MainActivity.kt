@@ -20,6 +20,10 @@ import com.stickeruploader.models.StickerPack
 
 class MainActivity : AppCompatActivity() {
 
+    private companion object {
+        const val TAG = "MainActivity"
+    }
+
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: StickerPackAdapter
     private val stickerPacks = mutableListOf<StickerPack>()
@@ -41,6 +45,15 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Inizializza logger su file - salva tutto in externalFilesDir/sticker_log.txt
+        AppLogger.init(this)
+        AppLogger.separator("APP AVVIATA")
+        AppLogger.i(TAG, "Android ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
+        AppLogger.i(TAG, "Log file: ${AppLogger.getLogFilePath()}")
+
+        // Mostra il path del log all'utente
+        binding.tvStatus.text = "Log: ${AppLogger.getLogFilePath()}"
 
         setupRecyclerView()
         setupButtons()
@@ -135,7 +148,18 @@ class MainActivity : AppCompatActivity() {
         binding.recyclerView.visibility = View.GONE
 
         Thread {
+            AppLogger.separator("CARICAMENTO STICKER")
+            AppLogger.i(TAG, "Directory sorgente: ${StickerPackLoader.STICKER_DIR.absolutePath}")
+            AppLogger.i(TAG, "Directory esiste: ${StickerPackLoader.STICKER_DIR.exists()}")
+            AppLogger.i(TAG, "filesDir: ${filesDir.absolutePath}")
+
             val packs = StickerPackLoader.loadAllPacks()
+
+            AppLogger.i(TAG, "Pack caricati: ${packs.size}")
+            packs.forEach { pack ->
+                AppLogger.i(TAG, "  Pack '${pack.name}' (${pack.identifier}): ${pack.stickers.size} sticker")
+            }
+
             runOnUiThread {
                 binding.progressBar.visibility = View.GONE
                 stickerPacks.clear()
@@ -145,12 +169,15 @@ class MainActivity : AppCompatActivity() {
 
                 if (packs.isEmpty()) {
                     val path = StickerPackLoader.STICKER_DIR.absolutePath
-                    binding.tvStatus.text =
-                        "Nessun file .webp trovato in:\n$path\n\nAssicurati che la cartella esista e contenga file .webp"
+                    val msg = "Nessun file .webp trovato in:\n$path"
+                    AppLogger.w(TAG, msg)
+                    binding.tvStatus.text = "$msg\n\nLog: ${AppLogger.getLogFilePath()}"
                     binding.btnAddAll.isEnabled = false
                 } else {
                     val totalStickers = packs.sumOf { it.stickers.size }
-                    binding.tvStatus.text = "Trovati $totalStickers sticker in ${packs.size} pack"
+                    val msg = "Trovati $totalStickers sticker in ${packs.size} pack"
+                    AppLogger.i(TAG, msg)
+                    binding.tvStatus.text = "$msg\nLog: ${AppLogger.getLogFilePath()}"
                     binding.btnAddAll.isEnabled = true
                 }
             }
@@ -158,20 +185,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addPackToWhatsApp(pack: StickerPack) {
-        // Mostra progresso mentre copiamo i file nella directory privata dell'app
         binding.progressBar.visibility = View.VISIBLE
         binding.tvStatus.text = "Preparazione ${pack.name}..."
 
         Thread {
-            // CRITICO: copia i file nella directory privata PRIMA di inviare l'intent.
-            // Il ContentProvider può servire file SOLO dalla directory privata dell'app
-            // quando viene chiamato da WhatsApp via IPC (scoped storage Android 10+).
-            StickerFileCache.preparePack(applicationContext, pack)
+            AppLogger.separator("AGGIUNTA PACK A WHATSAPP: ${pack.identifier}")
+            AppLogger.i(TAG, "Nome: ${pack.name}")
+            AppLogger.i(TAG, "Sticker: ${pack.stickers.size}")
+            AppLogger.i(TAG, "Tray image: ${pack.trayImageFile}")
+            AppLogger.i(TAG, "Authority: ${StickerContentProvider.AUTHORITY}")
+
+            try {
+                StickerFileCache.preparePack(applicationContext, pack)
+                AppLogger.i(TAG, "File copiati in filesDir con successo")
+
+                // Verifica che i file siano stati copiati
+                val stickersDir = java.io.File(filesDir, "stickers")
+                val trayDir = java.io.File(filesDir, "tray_images")
+                AppLogger.i(TAG, "stickersDir: ${stickersDir.absolutePath}, exists=${stickersDir.exists()}, files=${stickersDir.listFiles()?.size ?: 0}")
+                AppLogger.i(TAG, "trayDir: ${trayDir.absolutePath}, exists=${trayDir.exists()}")
+
+                val trayFile = java.io.File(trayDir, "${pack.identifier}_tray.webp")
+                AppLogger.i(TAG, "tray file: ${trayFile.absolutePath}, exists=${trayFile.exists()}, size=${trayFile.length()}")
+
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Errore preparazione pack", e)
+            }
 
             runOnUiThread {
                 binding.progressBar.visibility = View.GONE
                 val total = stickerPacks.sumOf { it.stickers.size }
-                binding.tvStatus.text = "Trovati $total sticker in ${stickerPacks.size} pack"
+                binding.tvStatus.text = "Trovati $total sticker in ${stickerPacks.size} pack\nLog: ${AppLogger.getLogFilePath()}"
 
                 val intent = Intent().apply {
                     action = "com.whatsapp.intent.action.ENABLE_STICKER_PACK"
@@ -179,11 +223,18 @@ class MainActivity : AppCompatActivity() {
                     putExtra("sticker_pack_authority", StickerContentProvider.AUTHORITY)
                     putExtra("sticker_pack_name", pack.name)
                 }
+                AppLogger.i(TAG, "Invio intent WhatsApp: action=${intent.action}")
+                AppLogger.i(TAG, "  sticker_pack_id=${pack.identifier}")
+                AppLogger.i(TAG, "  sticker_pack_authority=${StickerContentProvider.AUTHORITY}")
+                AppLogger.i(TAG, "  sticker_pack_name=${pack.name}")
+
                 try {
                     @Suppress("DEPRECATION")
                     startActivityForResult(intent, ADD_PACK_REQUEST_CODE)
                     pendingPackId = pack.identifier
+                    AppLogger.i(TAG, "Intent inviato - WhatsApp dovrebbe aprirsi")
                 } catch (e: Exception) {
+                    AppLogger.e(TAG, "Errore invio intent", e)
                     Toast.makeText(this, "WhatsApp non trovato o errore: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
@@ -209,6 +260,12 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == ADD_PACK_REQUEST_CODE) {
             val packId = pendingPackId
+            AppLogger.separator("RISULTATO DA WHATSAPP")
+            AppLogger.i(TAG, "resultCode=$resultCode (OK=${RESULT_OK}, CANCELED=${RESULT_CANCELED})")
+            AppLogger.i(TAG, "packId=$packId")
+            if (resultCode == RESULT_OK) AppLogger.i(TAG, "✅ Pack aggiunto con successo!")
+            else AppLogger.w(TAG, "❌ Pack NON aggiunto - resultCode=$resultCode")
+
             if (resultCode == RESULT_OK && packId != null) {
                 adapter.markAsAdded(packId)
                 if (batchPacksToAdd.isNotEmpty()) {
