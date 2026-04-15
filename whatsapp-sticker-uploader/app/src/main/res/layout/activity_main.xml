@@ -4,14 +4,14 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#F5F5F5">
+    android:background="@color/background">
 
     <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="#2196F3"
+        android:background="@color/primary"
         android:padding="16dp">
 
         <TextView
@@ -39,7 +39,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:padding="12dp"
-        android:background="#FAFAFA">
+        android:background="@color/surface">
 
         <Button
             android:id="@+id/btnReload"
@@ -54,18 +54,28 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:text="Aggiungi TUTTI"
+            android:text="Aggiungi TUTTI i Pack a WhatsApp"
             android:textSize="13sp"
-            android:enabled="false" />
+            android:enabled="false"
+            android:backgroundTint="@color/whatsapp_green" />
 
     </LinearLayout>
 
+    <!-- Progress bar -->
+    <ProgressBar
+        android:id="@+id/progressBar"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:indeterminate="true"
+        android:visibility="gone" />
+
     <!-- Lista dei pack -->
-    <ListView
-        android:id="@+id/list"
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:padding="4dp" />
+        android:visibility="gone" />
 
 </LinearLayout>
