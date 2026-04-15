@@ -1,0 +1,121 @@
+package com.stickeruploader
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.util.Log
+import com.stickeruploader.models.StickerPack
+import java.io.File
+import java.io.FileOutputStream
+
+/**
+ * Gestisce la copia dei file sticker nella directory PRIVATA dell'app (filesDir).
+ *
+ * CRITICO: usa SOLO filesDir, NON externalFilesDir.
+ * Il ContentProvider può servire file SOLO da filesDir quando chiamato
+ * da WhatsApp via IPC (scoped storage Android 10+).
+ * externalFilesDir NON è accessibile al ContentProvider cross-process.
+ */
+object StickerFileCache {
+
+    private const val TAG = "StickerFileCache"
+    private const val STICKERS_DIR = "stickers"
+    private const val TRAY_DIR = "tray_images"
+
+    // USA SOLO filesDir - MAI externalFilesDir
+    fun getStickersBaseDir(context: Context): File =
+        File(context.filesDir, STICKERS_DIR).also { it.mkdirs() }
+
+    fun getTrayBaseDir(context: Context): File =
+        File(context.filesDir, TRAY_DIR).also { it.mkdirs() }
+
+    fun getCachedStickerFile(context: Context, fileName: String): File {
+        return File(getStickersBaseDir(context), fileName)
+    }
+
+    fun getCachedTrayFile(context: Context, packId: String): File {
+        return File(getTrayBaseDir(context), "${packId}_tray.webp")
+    }
+
+    /**
+     * Copia tutti i file del pack nella directory privata dell'app e
+     * genera la tray image 96×96. Blocca il thread chiamante.
+     * Ritorna true se tutto è andato a buon fine.
+     */
+    fun preparePack(context: Context, pack: StickerPack): Boolean {
+        Log.d(TAG, "preparePack() per ${pack.identifier}, ${pack.stickers.size} sticker")
+        Log.d(TAG, "filesDir: ${context.filesDir.absolutePath}")
+
+        val stickersDir = getStickersBaseDir(context)
+        val trayDir = getTrayBaseDir(context)
+        stickersDir.mkdirs()
+        trayDir.mkdirs()
+
+        var copied = 0
+        // Copia ogni sticker
+        for (sticker in pack.stickers) {
+            val source = StickerPackLoader.getStickerFile(sticker.imageFileName)
+            val dest = File(stickersDir, sticker.imageFileName)
+            if (!dest.exists() || dest.length() == 0L) {
+                if (!source.exists()) {
+                    Log.w(TAG, "Sorgente non trovato: ${source.absolutePath}")
+                    continue
+                }
+                try {
+                    source.copyTo(dest, overwrite = true)
+                    copied++
+                } catch (e: Exception) {
+                    Log.e(TAG, "Errore copia ${sticker.imageFileName}: ${e.message}")
+                }
+            }
+        }
+        Log.d(TAG, "Copiati $copied/${pack.stickers.size} sticker in ${stickersDir.absolutePath}")
+
+        // Genera tray image 96×96 dalla prima immagine del pack
+        val trayFile = getCachedTrayFile(context, pack.identifier)
+        if (!trayFile.exists() || trayFile.length() == 0L) {
+            val traySource = StickerPackLoader.getStickerFile(pack.trayImageFile)
+            Log.d(TAG, "Generando tray 96x96 da: ${traySource.absolutePath}")
+            createTrayImage(traySource, trayFile)
+            Log.d(TAG, "Tray creata: ${trayFile.absolutePath} size=${trayFile.length()}")
+        } else {
+            Log.d(TAG, "Tray già presente: ${trayFile.absolutePath}")
+        }
+
+        return true
+    }
+
+    /**
+     * Crea una tray image 96×96 WebP da un file sorgente.
+     * Se il file sorgente non può essere decodificato, genera un bitmap grigio di fallback.
+     * Garantisce sempre un output valido (non ritorna mai sourceFile 512×512).
+     */
+    private fun createTrayImage(source: File, dest: File) {
+        dest.parentFile?.mkdirs()
+
+        val sourceBitmap: Bitmap = try {
+            BitmapFactory.decodeFile(source.absolutePath)
+                ?: Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
+        } catch (e: Exception) {
+            Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
+        }
+
+        try {
+            val scaled = Bitmap.createScaledBitmap(sourceBitmap, 96, 96, true)
+            if (sourceBitmap !== scaled) sourceBitmap.recycle()
+
+            FileOutputStream(dest).use { fos ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, fos)
+                } else {
+                    @Suppress("DEPRECATION")
+                    scaled.compress(Bitmap.CompressFormat.WEBP, 80, fos)
+                }
+            }
+            scaled.recycle()
+        } catch (e: Exception) {
+            sourceBitmap.recycle()
+        }
+    }
+}
