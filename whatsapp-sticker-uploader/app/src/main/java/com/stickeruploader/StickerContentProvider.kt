@@ -3,6 +3,7 @@ package com.stickeruploader
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.UriMatcher
+import android.content.res.AssetFileDescriptor
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.graphics.Bitmap
@@ -90,7 +91,7 @@ class StickerContentProvider : ContentProvider() {
         }
     }
 
-    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
+    override fun openAssetFile(uri: Uri, mode: String): AssetFileDescriptor? {
         return when (URI_MATCHER.match(uri)) {
             STICKERS_ASSET -> {
                 val segments = uri.pathSegments
@@ -105,12 +106,14 @@ class StickerContentProvider : ContentProvider() {
                 val pack = packsCache.find { it.identifier == packId }
                 val isTrayImage = pack?.trayImageFile == fileName
 
-                if (isTrayImage) {
-                    val trayFile = getOrCreateTrayImage(packId, sourceFile)
-                    ParcelFileDescriptor.open(trayFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                val file = if (isTrayImage) {
+                    getOrCreateTrayImage(packId, sourceFile)
                 } else {
-                    ParcelFileDescriptor.open(sourceFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                    sourceFile
                 }
+
+                val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                AssetFileDescriptor(pfd, 0, file.length())
             }
             else -> throw FileNotFoundException("URI non supportato: $uri")
         }
