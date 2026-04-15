@@ -23,8 +23,13 @@ jobs:
       run: |
         cd whatsapp-sticker-uploader
         chmod +x gradlew
-        ./gradlew assembleDebug 2>&1 | tee build.log
-        echo "Exit code: $?"
+        ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
+        BUILD_EXIT=${PIPESTATUS[0]}
+        if [ $BUILD_EXIT -ne 0 ]; then
+          echo "=== BUILD FAILED - Full log ==="
+          cat build.log
+          exit $BUILD_EXIT
+        fi
 
     - name: Verify APK exists
       run: |
@@ -34,7 +39,7 @@ jobs:
           ls -lh "$APK"
         else
           echo "❌ APK non trovata"
-          tail -50 whatsapp-sticker-uploader/build.log
+          cat whatsapp-sticker-uploader/build.log
           exit 1
         fi
 
