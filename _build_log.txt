@@ -21,27 +21,27 @@ Daemon will be stopped at the end of the build
 > Task :app:generateDebugResources
 > Task :app:dataBindingMergeDependencyArtifactsDebug
 > Task :app:packageDebugResources
-> Task :app:checkDebugAarMetadata
 > Task :app:mapDebugSourceSetPaths
-> Task :app:parseDebugLocalResources
 > Task :app:createDebugCompatibleScreenManifests
 > Task :app:extractDeepLinksDebug
+> Task :app:checkDebugAarMetadata
+> Task :app:parseDebugLocalResources
 > Task :app:processDebugMainManifest
 > Task :app:processDebugManifest
 > Task :app:javaPreCompileDebug
 > Task :app:mergeDebugShaders
-> Task :app:mergeDebugResources
 > Task :app:compileDebugShaders NO-SOURCE
-> Task :app:dataBindingGenBaseClassesDebug
 > Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugResources
 > Task :app:mergeDebugAssets
+> Task :app:dataBindingGenBaseClassesDebug
 > Task :app:compressDebugAssets
 > Task :app:checkDebugDuplicateClasses
 > Task :app:desugarDebugFileDependencies
-> Task :app:processDebugManifestForPackage
-> Task :app:mergeLibDexDebug
 > Task :app:mergeDebugJniLibFolders
 > Task :app:mergeDebugNativeLibs NO-SOURCE
+> Task :app:mergeLibDexDebug
+> Task :app:processDebugManifestForPackage
 > Task :app:stripDebugDebugSymbols NO-SOURCE
 > Task :app:processDebugResources
 > Task :app:validateSigningDebug
@@ -58,5 +58,5 @@ Daemon will be stopped at the end of the build
 > Task :app:createDebugApkListingFileRedirect
 > Task :app:assembleDebug
 
-BUILD SUCCESSFUL in 30s
+BUILD SUCCESSFUL in 31s
 35 actionable tasks: 35 executed
