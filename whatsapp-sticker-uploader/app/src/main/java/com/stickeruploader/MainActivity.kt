@@ -158,19 +158,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addPackToWhatsApp(pack: StickerPack) {
-        val intent = Intent().apply {
-            action = "com.whatsapp.intent.action.ENABLE_STICKER_PACK"
-            putExtra("sticker_pack_id", pack.identifier)
-            putExtra("sticker_pack_authority", StickerContentProvider.AUTHORITY)
-            putExtra("sticker_pack_name", pack.name)
-        }
-        try {
-            @Suppress("DEPRECATION")
-            startActivityForResult(intent, ADD_PACK_REQUEST_CODE)
-            pendingPackId = pack.identifier
-        } catch (e: Exception) {
-            Toast.makeText(this, "WhatsApp non trovato o errore: ${e.message}", Toast.LENGTH_LONG).show()
-        }
+        // Mostra progresso mentre copiamo i file nella directory privata dell'app
+        binding.progressBar.visibility = View.VISIBLE
+        binding.tvStatus.text = "Preparazione ${pack.name}..."
+
+        Thread {
+            // CRITICO: copia i file nella directory privata PRIMA di inviare l'intent.
+            // Il ContentProvider può servire file SOLO dalla directory privata dell'app
+            // quando viene chiamato da WhatsApp via IPC (scoped storage Android 10+).
+            StickerFileCache.preparePack(applicationContext, pack)
+
+            runOnUiThread {
+                binding.progressBar.visibility = View.GONE
+                val total = stickerPacks.sumOf { it.stickers.size }
+                binding.tvStatus.text = "Trovati $total sticker in ${stickerPacks.size} pack"
+
+                val intent = Intent().apply {
+                    action = "com.whatsapp.intent.action.ENABLE_STICKER_PACK"
+                    putExtra("sticker_pack_id", pack.identifier)
+                    putExtra("sticker_pack_authority", StickerContentProvider.AUTHORITY)
+                    putExtra("sticker_pack_name", pack.name)
+                }
+                try {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(intent, ADD_PACK_REQUEST_CODE)
+                    pendingPackId = pack.identifier
+                } catch (e: Exception) {
+                    Toast.makeText(this, "WhatsApp non trovato o errore: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
 
     private var pendingPackId: String? = null

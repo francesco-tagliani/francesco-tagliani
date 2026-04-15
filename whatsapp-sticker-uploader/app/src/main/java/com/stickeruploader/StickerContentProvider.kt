@@ -3,17 +3,13 @@ package com.stickeruploader
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.UriMatcher
+import android.content.res.AssetFileDescriptor
 import android.database.Cursor
 import android.database.MatrixCursor
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import android.os.ParcelFileDescriptor
 import com.stickeruploader.models.StickerPack
-import java.io.File
 import java.io.FileNotFoundException
-import java.io.FileOutputStream
 
 class StickerContentProvider : ContentProvider() {
 
@@ -49,7 +45,6 @@ class StickerContentProvider : ContentProvider() {
             "animated_sticker_pack"
         )
 
-        // Nomi colonne ESATTI per gli sticker
         private val STICKER_COLUMNS = arrayOf(
             "sticker_file_name",
             "sticker_emoji",
@@ -90,34 +85,46 @@ class StickerContentProvider : ContentProvider() {
                 val packId = uri.lastPathSegment ?: return null
                 getStickersForPack(packId, uri)
             }
-            else -> throw IllegalArgumentException("URI sconosciuto: $uri")
+            else -> null
         }
     }
 
-    // Usa openFile() che è il metodo base - più compatibile con WhatsApp
-    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
-        return when (URI_MATCHER.match(uri)) {
-            STICKERS_ASSET -> {
-                val segments = uri.pathSegments
-                if (segments.size < 3) throw FileNotFoundException("URI non valido: $uri")
-                val packId = segments[1]
-                val fileName = segments[2]
+    /**
+     * openAssetFile: metodo usato dall'implementazione ufficiale WhatsApp.
+     * Serve i file dalla directory privata dell'app (filesDir/externalFilesDir)
+     * per garantire accesso quando il ContentProvider è avviato da WhatsApp via IPC.
+     * File su /storage/emulated/0/Android/media/com.whatsapp/ NON sono accessibili
+     * al ContentProvider quando chiamato da WhatsApp (scoped storage Android 10+).
+     */
+    override fun openAssetFile(uri: Uri, mode: String): AssetFileDescriptor? {
+        val segments = uri.pathSegments
+        // URI deve avere esattamente 3 segmenti: stickers_asset/{packId}/{filename}
+        if (segments.size != 3) return null
 
-                val sourceFile = StickerPackLoader.getStickerFile(fileName)
-                if (!sourceFile.exists()) throw FileNotFoundException("File non trovato: ${sourceFile.absolutePath}")
+        val packId = segments[1]
+        val fileName = segments[2]
 
-                val pack = packsCache.find { it.identifier == packId }
-                val isTrayImage = pack?.trayImageFile == fileName
+        if (packId.isBlank() || fileName.isBlank()) return null
 
-                val file = if (isTrayImage) {
-                    getOrCreateTrayImage(packId, sourceFile)
-                } else {
-                    sourceFile
-                }
+        val ctx = context ?: return null
 
-                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            }
-            else -> throw FileNotFoundException("URI non supportato: $uri")
+        val pack = packsCache.find { it.identifier == packId } ?: return null
+
+        val isTrayImage = pack.trayImageFile == fileName
+
+        val file = if (isTrayImage) {
+            StickerFileCache.getCachedTrayFile(ctx, packId)
+        } else {
+            StickerFileCache.getCachedStickerFile(ctx, fileName)
+        }
+
+        if (!file.exists() || file.length() == 0L) return null
+
+        return try {
+            val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            AssetFileDescriptor(pfd, 0, AssetFileDescriptor.UNKNOWN_LENGTH)
+        } catch (e: FileNotFoundException) {
+            null
         }
     }
 
@@ -146,7 +153,7 @@ class StickerContentProvider : ContentProvider() {
                 cursor.addRow(arrayOf(
                     sticker.imageFileName,
                     sticker.emojis.joinToString(","),
-                    ""  // sticker_accessibility_text
+                    ""
                 ))
             }
         }
@@ -166,69 +173,10 @@ class StickerContentProvider : ContentProvider() {
             "",   // sticker_pack_publisher_website
             "",   // sticker_pack_privacy_policy_website
             "",   // sticker_pack_license_agreement_website
-            "1",  // image_data_version (stringa non vuota)
-            0,    // whatsapp_will_not_cache_stickers (int)
-            0     // animated_sticker_pack (int)
+            "1",  // image_data_version
+            0,    // whatsapp_will_not_cache_stickers
+            0     // animated_sticker_pack
         )
-    }
-
-    /**
-     * Crea (e cachea) la tray image a 96×96 pixel.
-     * WhatsApp richiede ESATTAMENTE 96×96 e max 50KB.
-     * Se BitmapFactory non riesce a decodificare il file sorgente,
-     * crea un bitmap grigio solido come fallback — garantisce sempre 96×96.
-     */
-    private fun getOrCreateTrayImage(packId: String, sourceFile: File): File {
-        val ctx = context ?: return sourceFile
-        val trayDir = File(ctx.cacheDir, "tray_images")
-        trayDir.mkdirs()
-        val trayFile = File(trayDir, "${packId}_tray.webp")
-
-        if (trayFile.exists() && trayFile.length() > 0) return trayFile
-
-        // Prova a decodificare il file sorgente; se fallisce usa un bitmap grigio
-        val sourceBitmap: Bitmap = try {
-            BitmapFactory.decodeFile(sourceFile.absolutePath)
-                ?: Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
-        } catch (e: Exception) {
-            Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
-        }
-
-        return try {
-            // Scala SEMPRE a 96×96
-            val scaled = Bitmap.createScaledBitmap(sourceBitmap, 96, 96, true)
-            if (sourceBitmap !== scaled) sourceBitmap.recycle()
-
-            FileOutputStream(trayFile).use { fos ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, fos)
-                } else {
-                    @Suppress("DEPRECATION")
-                    scaled.compress(Bitmap.CompressFormat.WEBP, 80, fos)
-                }
-            }
-            scaled.recycle()
-
-            // Verifica che il file sia stato scritto correttamente
-            if (trayFile.exists() && trayFile.length() > 0) trayFile else sourceFile
-        } catch (e: Exception) {
-            // Ultimo fallback: prova a creare un bitmap minimo da zero
-            try {
-                val fallback = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
-                FileOutputStream(trayFile).use { fos ->
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        fallback.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, fos)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        fallback.compress(Bitmap.CompressFormat.WEBP, 80, fos)
-                    }
-                }
-                fallback.recycle()
-                if (trayFile.exists() && trayFile.length() > 0) trayFile else sourceFile
-            } catch (e2: Exception) {
-                sourceFile
-            }
-        }
     }
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
