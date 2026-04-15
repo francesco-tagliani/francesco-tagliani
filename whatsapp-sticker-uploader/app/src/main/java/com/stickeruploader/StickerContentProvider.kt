@@ -33,6 +33,7 @@ class StickerContentProvider : ContentProvider() {
         }
 
         private val METADATA_COLUMNS = arrayOf(
+            "_id",
             "sticker_pack_identifier",
             "sticker_pack_name",
             "sticker_pack_publisher",
@@ -47,6 +48,7 @@ class StickerContentProvider : ContentProvider() {
         )
 
         private val STICKER_COLUMNS = arrayOf(
+            "_id",
             "sticker_file_name",
             "sticker_emoji"
         )
@@ -147,8 +149,8 @@ class StickerContentProvider : ContentProvider() {
 
     private fun getAllPacksMetadata(): Cursor {
         val cursor = MatrixCursor(METADATA_COLUMNS)
-        for (pack in packsCache) {
-            cursor.addRow(packToRow(pack))
+        for ((index, pack) in packsCache.withIndex()) {
+            cursor.addRow(packToRow(index.toLong(), pack))
         }
         return cursor
     }
@@ -156,15 +158,19 @@ class StickerContentProvider : ContentProvider() {
     private fun getSinglePackMetadata(packId: String): Cursor {
         val cursor = MatrixCursor(METADATA_COLUMNS)
         val pack = packsCache.find { it.identifier == packId }
-        if (pack != null) cursor.addRow(packToRow(pack))
+        if (pack != null) {
+            val index = packsCache.indexOf(pack).toLong()
+            cursor.addRow(packToRow(index, pack))
+        }
         return cursor
     }
 
     private fun getStickersForPack(packId: String): Cursor {
         val cursor = MatrixCursor(STICKER_COLUMNS)
         val pack = packsCache.find { it.identifier == packId } ?: return cursor
-        for (sticker in pack.stickers) {
+        for ((index, sticker) in pack.stickers.withIndex()) {
             cursor.addRow(arrayOf(
+                index.toLong(),
                 sticker.imageFileName,
                 sticker.emojis.joinToString(",")
             ))
@@ -172,8 +178,9 @@ class StickerContentProvider : ContentProvider() {
         return cursor
     }
 
-    private fun packToRow(pack: StickerPack): Array<Any?> {
+    private fun packToRow(id: Long, pack: StickerPack): Array<Any?> {
         return arrayOf(
+            id,
             pack.identifier,
             pack.name,
             pack.publisher,
