@@ -144,11 +144,11 @@ class StickerContentProvider : ContentProvider() {
         // che non coincide mai con i nomi degli sticker (es. "IMG001.webp")
         // → tray e sticker vengono sempre serviti correttamente
         val file = if (pack.trayImageFile == fileName) {
-            // Richiesta del tray icon (96x96)
+            // Richiesta del tray icon (96x96) - generato in filesDir
             StickerFileCache.getCachedTrayFile(ctx, packId)
         } else {
-            // Richiesta di uno sticker normale (512x512)
-            StickerFileCache.getCachedStickerFile(ctx, fileName)
+            // Richiesta di uno sticker - servito direttamente dalla cartella WhatsApp (nessuna copia)
+            StickerPackLoader.getStickerFile(fileName)
         }
 
         Log.d(TAG, "  -> file: ${file.absolutePath}, exists=${file.exists()}, size=${file.length()}")
