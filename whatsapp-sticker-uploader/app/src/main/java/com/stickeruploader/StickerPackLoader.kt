@@ -38,7 +38,7 @@ object StickerPackLoader {
             val animated = isAnimatedWebP(file)
 
             if (animated) {
-                if (size <= MAX_ANIMATED_SIZE_BYTES) animatedFiles.add(file)
+                if (size <= MAX_ANIMATED_SIZE_BYTES && is512x512(file)) animatedFiles.add(file)
             } else {
                 if (size <= MAX_STATIC_SIZE_BYTES && is512x512(file)) staticFiles.add(file)
             }
@@ -102,26 +102,26 @@ object StickerPackLoader {
         if (file.length() < 20) return false
         return try {
             RandomAccessFile(file, "r").use { raf ->
-                val header = ByteArray(64)
+                // Legge i primi 256 byte per trovare VP8X e ANIM
+                val header = ByteArray(256)
                 val read = raf.read(header)
                 if (read < 12) return false
 
                 // Verifica firma RIFF...WEBP
                 if (header[0] != 'R'.code.toByte() || header[1] != 'I'.code.toByte() ||
                     header[2] != 'F'.code.toByte() || header[3] != 'F'.code.toByte()) return false
-                if (read < 12) return false
                 if (header[8] != 'W'.code.toByte() || header[9] != 'E'.code.toByte() ||
                     header[10] != 'B'.code.toByte() || header[11] != 'P'.code.toByte()) return false
 
-                // Metodo 1: VP8X con flag animazione (bit 1 del byte flags a offset 20)
+                // Metodo 1: VP8X con flag animazione (bit 2 = 0x04 secondo spec WebP)
                 if (read >= 21 &&
                     header[12] == 'V'.code.toByte() && header[13] == 'P'.code.toByte() &&
                     header[14] == '8'.code.toByte() && header[15] == 'X'.code.toByte()) {
                     val flags = header[20].toInt() and 0xFF
-                    if ((flags and 0x02) != 0) return true
+                    if ((flags and 0x04) != 0) return true  // bit 2 = Animation flag
                 }
 
-                // Metodo 2: cerca il chunk ANIM in tutto l'header letto
+                // Metodo 2: cerca il chunk ANIM nei byte letti
                 for (i in 0..read - 4) {
                     if (header[i]   == 'A'.code.toByte() &&
                         header[i+1] == 'N'.code.toByte() &&
