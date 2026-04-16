@@ -9,43 +9,27 @@ import com.stickeruploader.models.StickerPack
 import java.io.File
 import java.io.FileOutputStream
 
-/**
- * Gestisce la copia dei file sticker nella directory PRIVATA dell'app (filesDir).
- *
- * CRITICO: usa SOLO filesDir, NON externalFilesDir.
- * Il ContentProvider può servire file SOLO da filesDir quando chiamato
- * da WhatsApp via IPC (scoped storage Android 10+).
- * externalFilesDir NON è accessibile al ContentProvider cross-process.
- */
 object StickerFileCache {
 
     private const val TAG = "StickerFileCache"
     private const val STICKERS_DIR = "stickers"
     private const val TRAY_DIR = "tray_images"
 
-    // USA SOLO filesDir - MAI externalFilesDir
     fun getStickersBaseDir(context: Context): File =
         File(context.filesDir, STICKERS_DIR).also { it.mkdirs() }
 
     fun getTrayBaseDir(context: Context): File =
         File(context.filesDir, TRAY_DIR).also { it.mkdirs() }
 
-    fun getCachedStickerFile(context: Context, fileName: String): File {
-        return File(getStickersBaseDir(context), fileName)
-    }
+    fun getCachedStickerFile(context: Context, fileName: String): File =
+        File(getStickersBaseDir(context), fileName)
 
-    fun getCachedTrayFile(context: Context, packId: String): File {
-        return File(getTrayBaseDir(context), "${packId}_tray.webp")
-    }
+    // Il nome del tray file corrisponde a pack.trayImageFile = "${packId}_tray.webp"
+    fun getCachedTrayFile(context: Context, packId: String): File =
+        File(getTrayBaseDir(context), "${packId}_tray.webp")
 
-    /**
-     * Copia tutti i file del pack nella directory privata dell'app e
-     * genera la tray image 96×96. Blocca il thread chiamante.
-     * Ritorna true se tutto è andato a buon fine.
-     */
     fun preparePack(context: Context, pack: StickerPack): Boolean {
         Log.d(TAG, "preparePack() per ${pack.identifier}, ${pack.stickers.size} sticker")
-        Log.d(TAG, "filesDir: ${context.filesDir.absolutePath}")
 
         val stickersDir = getStickersBaseDir(context)
         val trayDir = getTrayBaseDir(context)
@@ -53,58 +37,60 @@ object StickerFileCache {
         trayDir.mkdirs()
 
         var copied = 0
-        // Copia ogni sticker
+        var failed = 0
         for (sticker in pack.stickers) {
             val source = StickerPackLoader.getStickerFile(sticker.imageFileName)
             val dest = File(stickersDir, sticker.imageFileName)
-            if (!dest.exists() || dest.length() == 0L) {
-                if (!source.exists()) {
-                    Log.w(TAG, "Sorgente non trovato: ${source.absolutePath}")
-                    continue
-                }
-                try {
-                    source.copyTo(dest, overwrite = true)
-                    copied++
-                } catch (e: Exception) {
-                    Log.e(TAG, "Errore copia ${sticker.imageFileName}: ${e.message}")
-                }
+            if (dest.exists() && dest.length() > 0L) continue
+            if (!source.exists()) {
+                Log.w(TAG, "Sorgente mancante: ${source.absolutePath}")
+                failed++
+                continue
+            }
+            try {
+                source.copyTo(dest, overwrite = true)
+                copied++
+            } catch (e: Exception) {
+                Log.e(TAG, "Errore copia ${sticker.imageFileName}: ${e.message}")
+                failed++
             }
         }
-        Log.d(TAG, "Copiati $copied/${pack.stickers.size} sticker in ${stickersDir.absolutePath}")
+        Log.d(TAG, "Copia sticker: $copied copiati, $failed falliti su ${pack.stickers.size}")
 
-        // Genera tray image 96×96 dalla prima immagine del pack
+        // FIX: usa il PRIMO sticker come sorgente per il tray (non pack.trayImageFile
+        // che ora è un nome univoco come "my_sticker_pack_001_tray.webp")
         val trayFile = getCachedTrayFile(context, pack.identifier)
         if (!trayFile.exists() || trayFile.length() == 0L) {
-            val traySource = StickerPackLoader.getStickerFile(pack.trayImageFile)
-            Log.d(TAG, "Generando tray 96x96 da: ${traySource.absolutePath}")
-            createTrayImage(traySource, trayFile)
-            Log.d(TAG, "Tray creata: ${trayFile.absolutePath} size=${trayFile.length()}")
+            val traySourceFileName = pack.stickers.firstOrNull()?.imageFileName
+            if (traySourceFileName != null) {
+                val traySource = StickerPackLoader.getStickerFile(traySourceFileName)
+                Log.d(TAG, "Generando tray 96x96 da: ${traySource.absolutePath}")
+                createTrayImage(traySource, trayFile)
+                Log.d(TAG, "Tray creata: ${trayFile.absolutePath} size=${trayFile.length()}")
+            } else {
+                Log.w(TAG, "Nessuno sticker nel pack, impossibile creare tray")
+            }
         } else {
             Log.d(TAG, "Tray già presente: ${trayFile.absolutePath}")
         }
 
-        return true
+        if (failed > 0) {
+            Log.w(TAG, "ATTENZIONE: $failed file non copiati - WhatsApp potrebbe rifiutare il pack")
+        }
+        return failed == 0
     }
 
-    /**
-     * Crea una tray image 96×96 WebP da un file sorgente.
-     * Se il file sorgente non può essere decodificato, genera un bitmap grigio di fallback.
-     * Garantisce sempre un output valido (non ritorna mai sourceFile 512×512).
-     */
     private fun createTrayImage(source: File, dest: File) {
         dest.parentFile?.mkdirs()
-
         val sourceBitmap: Bitmap = try {
             BitmapFactory.decodeFile(source.absolutePath)
                 ?: Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
         } catch (e: Exception) {
             Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
         }
-
         try {
             val scaled = Bitmap.createScaledBitmap(sourceBitmap, 96, 96, true)
             if (sourceBitmap !== scaled) sourceBitmap.recycle()
-
             FileOutputStream(dest).use { fos ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     scaled.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, fos)
@@ -116,6 +102,7 @@ object StickerFileCache {
             scaled.recycle()
         } catch (e: Exception) {
             sourceBitmap.recycle()
+            Log.e(TAG, "Errore creazione tray: ${e.message}")
         }
     }
 }

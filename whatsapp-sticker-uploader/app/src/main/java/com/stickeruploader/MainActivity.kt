@@ -196,8 +196,12 @@ class MainActivity : AppCompatActivity() {
             AppLogger.i(TAG, "Authority: ${StickerContentProvider.AUTHORITY}")
 
             try {
-                StickerFileCache.preparePack(applicationContext, pack)
-                AppLogger.i(TAG, "File copiati in filesDir con successo")
+                val ok = StickerFileCache.preparePack(applicationContext, pack)
+                if (ok) {
+                    AppLogger.i(TAG, "✅ Tutti i file copiati in filesDir")
+                } else {
+                    AppLogger.w(TAG, "⚠️ Alcuni file non copiati - WhatsApp potrebbe rifiutare il pack")
+                }
 
                 // Verifica che i file siano stati copiati
                 val stickersDir = java.io.File(filesDir, "stickers")
@@ -263,8 +267,15 @@ class MainActivity : AppCompatActivity() {
             AppLogger.separator("RISULTATO DA WHATSAPP")
             AppLogger.i(TAG, "resultCode=$resultCode (OK=${RESULT_OK}, CANCELED=${RESULT_CANCELED})")
             AppLogger.i(TAG, "packId=$packId")
-            if (resultCode == RESULT_OK) AppLogger.i(TAG, "✅ Pack aggiunto con successo!")
-            else AppLogger.w(TAG, "❌ Pack NON aggiunto - resultCode=$resultCode")
+            if (resultCode == RESULT_OK) {
+                AppLogger.i(TAG, "✅ Pack aggiunto con successo!")
+            } else {
+                AppLogger.w(TAG, "❌ Pack NON aggiunto - resultCode=$resultCode")
+                // Log di tutti gli extra dell'intent per diagnosticare l'errore
+                data?.extras?.keySet()?.forEach { key ->
+                    AppLogger.w(TAG, "  extra[$key] = ${data.extras?.get(key)}")
+                }
+            }
 
             if (resultCode == RESULT_OK && packId != null) {
                 adapter.markAsAdded(packId)

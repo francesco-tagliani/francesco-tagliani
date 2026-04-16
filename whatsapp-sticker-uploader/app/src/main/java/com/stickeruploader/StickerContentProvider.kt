@@ -12,20 +12,12 @@ import android.util.Log
 import com.stickeruploader.models.StickerPack
 import java.io.FileNotFoundException
 
-/**
- * ContentProvider per sticker WhatsApp.
- * Basato sul codice ufficiale: https://github.com/WhatsApp/stickers
- *
- * Serve file da filesDir (directory privata app), unico storage accessibile
- * al ContentProvider quando chiamato da WhatsApp via IPC cross-process.
- */
 class StickerContentProvider : ContentProvider() {
 
     companion object {
         private const val TAG = "StickerContentProvider"
         const val AUTHORITY = "com.stickeruploader.stickercontentprovider"
 
-        // URI paths (uguali al codice ufficiale WhatsApp)
         private const val METADATA = "metadata"
         private const val STICKERS = "stickers"
         private const val STICKERS_ASSET = "stickers_asset"
@@ -34,9 +26,7 @@ class StickerContentProvider : ContentProvider() {
         private const val METADATA_CODE_FOR_SINGLE_PACK = 2
         private const val STICKERS_CODE = 3
         private const val STICKERS_ASSET_CODE = 4
-        private const val STICKER_PACK_TRAY_ICON_CODE = 5
 
-        // Nomi colonne ESATTI richiesti da WhatsApp (dal codice ufficiale)
         private val METADATA_COLUMNS = arrayOf(
             "sticker_pack_identifier",
             "sticker_pack_name",
@@ -68,17 +58,9 @@ class StickerContentProvider : ContentProvider() {
     }
 
     private val packsCache: List<StickerPack> by lazy {
-        Log.d(TAG, "Caricamento pack in cache lazy")
+        Log.d(TAG, "Caricamento pack in lazy cache")
         val packs = StickerPackLoader.loadAllPacks()
-        Log.d(TAG, "Cache: ${packs.size} pack")
-
-        // Registra URI per ogni singolo sticker (come fa il codice ufficiale WhatsApp)
-        for (pack in packs) {
-            URI_MATCHER.addURI(AUTHORITY, "$STICKERS_ASSET/${pack.identifier}/${pack.trayImageFile}", STICKER_PACK_TRAY_ICON_CODE)
-            for (sticker in pack.stickers) {
-                URI_MATCHER.addURI(AUTHORITY, "$STICKERS_ASSET/${pack.identifier}/${sticker.imageFileName}", STICKERS_ASSET_CODE)
-            }
-        }
+        Log.d(TAG, "Cache: ${packs.size} pack caricati")
         packs
     }
 
@@ -93,7 +75,6 @@ class StickerContentProvider : ContentProvider() {
             METADATA_CODE_FOR_SINGLE_PACK -> "vnd.android.cursor.item/vnd.$AUTHORITY.$METADATA"
             STICKERS_CODE -> "vnd.android.cursor.dir/vnd.$AUTHORITY.$STICKERS"
             STICKERS_ASSET_CODE -> "image/webp"
-            STICKER_PACK_TRAY_ICON_CODE -> "image/webp"
             else -> null
         }
     }
@@ -122,24 +103,29 @@ class StickerContentProvider : ContentProvider() {
                 getStickersCursor(packId, uri)
             }
             else -> {
-                Log.w(TAG, "  -> URI non riconosciuta: $uri")
+                Log.w(TAG, "  -> URI non riconosciuta: $uri (code=${URI_MATCHER.match(uri)})")
                 null
             }
         }
     }
 
+    // FIX: override openFile() oltre a openAssetFile() - WhatsApp può chiamare entrambi
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
+        Log.d(TAG, "openFile($uri)")
+        return openAssetFile(uri, mode)?.parcelFileDescriptor
+    }
+
     override fun openAssetFile(uri: Uri, mode: String): AssetFileDescriptor? {
         Log.d(TAG, "openAssetFile($uri)")
 
-        val matchCode = URI_MATCHER.match(uri)
-        if (matchCode != STICKERS_ASSET_CODE && matchCode != STICKER_PACK_TRAY_ICON_CODE) {
-            Log.w(TAG, "  -> match non valido: $matchCode")
+        if (URI_MATCHER.match(uri) != STICKERS_ASSET_CODE) {
+            Log.w(TAG, "  -> URI non valida per asset: $uri")
             return null
         }
 
         val segments = uri.pathSegments
         if (segments.size < 3) {
-            Log.w(TAG, "  -> URI malformata: solo ${segments.size} segmenti")
+            Log.w(TAG, "  -> URI malformata: ${segments.size} segmenti")
             return null
         }
 
@@ -147,34 +133,34 @@ class StickerContentProvider : ContentProvider() {
         val fileName = segments[2]
         Log.d(TAG, "  -> packId=$packId, fileName=$fileName")
 
-        val ctx = context ?: run {
-            Log.e(TAG, "  -> Context null!")
-            return null
-        }
+        val ctx = context ?: return null
 
         val pack = packsCache.find { it.identifier == packId } ?: run {
-            Log.w(TAG, "  -> Pack non trovato: $packId")
+            Log.w(TAG, "  -> Pack '$packId' non trovato in cache (${packsCache.size} pack)")
             return null
         }
 
-        // Sceglie il file giusto: tray image o sticker
+        // FIX: trayImageFile è ora un nome univoco (es. "my_sticker_pack_001_tray.webp")
+        // che non coincide mai con i nomi degli sticker (es. "IMG001.webp")
+        // → tray e sticker vengono sempre serviti correttamente
         val file = if (pack.trayImageFile == fileName) {
+            // Richiesta del tray icon (96x96)
             StickerFileCache.getCachedTrayFile(ctx, packId)
         } else {
+            // Richiesta di uno sticker normale (512x512)
             StickerFileCache.getCachedStickerFile(ctx, fileName)
         }
 
-        Log.d(TAG, "  -> cercando: ${file.absolutePath}")
-        Log.d(TAG, "  -> esiste=${file.exists()}, size=${file.length()}")
+        Log.d(TAG, "  -> file: ${file.absolutePath}, exists=${file.exists()}, size=${file.length()}")
 
         if (!file.exists() || file.length() == 0L) {
-            Log.w(TAG, "  -> File non trovato o vuoto!")
+            Log.w(TAG, "  -> FILE NON TROVATO O VUOTO: ${file.absolutePath}")
             return null
         }
 
         return try {
             val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            Log.d(TAG, "  -> Aperto con successo")
+            Log.d(TAG, "  -> OK, servito")
             AssetFileDescriptor(pfd, 0, AssetFileDescriptor.UNKNOWN_LENGTH)
         } catch (e: FileNotFoundException) {
             Log.e(TAG, "  -> FileNotFoundException: ${e.message}")
@@ -189,16 +175,16 @@ class StickerContentProvider : ContentProvider() {
                 pack.identifier,
                 pack.name,
                 pack.publisher,
-                pack.trayImageFile,
-                "",   // android_play_store_link
-                "",   // ios_app_download_link
-                "",   // publisher_email
-                "",   // publisher_website
-                "",   // privacy_policy_website
-                "",   // license_agreement_website
-                "1",  // image_data_version
-                0,    // whatsapp_will_not_cache_stickers
-                0     // animated_sticker_pack
+                pack.trayImageFile,   // nome univoco es. "my_sticker_pack_001_tray.webp"
+                "",  // android_play_store_link
+                "",  // ios_app_download_link
+                "",  // publisher_email
+                "",  // publisher_website
+                "",  // privacy_policy_website
+                "",  // license_agreement_website
+                "1", // image_data_version
+                0,   // whatsapp_will_not_cache_stickers
+                0    // animated_sticker_pack
             ))
         }
         context?.let { cursor.setNotificationUri(it.contentResolver, uri) }
@@ -218,7 +204,7 @@ class StickerContentProvider : ContentProvider() {
             }
             Log.d(TAG, "getStickersCursor: ${pack.stickers.size} sticker per $packId")
         } else {
-            Log.w(TAG, "getStickersCursor: pack $packId non trovato")
+            Log.w(TAG, "getStickersCursor: pack '$packId' non trovato")
         }
         context?.let { cursor.setNotificationUri(it.contentResolver, uri) }
         return cursor

@@ -30,7 +30,6 @@ object StickerPackLoader {
         // Filtra file non validi per WhatsApp
         val validFiles = allFiles.filter { file ->
             val size = file.length()
-            // File deve essere > 0 e <= 100KB
             size > 0L && size <= MAX_STICKER_SIZE_BYTES && !isAnimatedWebP(file)
         }
 
@@ -39,54 +38,40 @@ object StickerPackLoader {
         val chunks = validFiles.chunked(STICKERS_PER_PACK)
 
         return chunks.mapIndexedNotNull { index, files ->
-            // WhatsApp richiede minimo 3 sticker per pack
             if (files.size < 3) return@mapIndexedNotNull null
 
             val packNumber = index + 1
+            val packId = "my_sticker_pack_%03d".format(packNumber)
             val stickers = files.map { file ->
-                Sticker(
-                    imageFileName = file.name,
-                    emojis = listOf("😀")
-                )
+                Sticker(imageFileName = file.name, emojis = listOf("😀"))
             }
             StickerPack(
-                identifier = "my_sticker_pack_%03d".format(packNumber),
+                identifier = packId,
                 name = "New Stiker $packNumber",
                 publisher = "Il mio dispositivo",
-                trayImageFile = files.first().name,
+                // FIX: usa un nome UNIVOCO per il tray che non coincide con nessuno sticker
+                trayImageFile = "${packId}_tray.webp",
                 stickers = stickers
             )
         }
     }
 
-    fun getStickerFile(fileName: String): File {
-        return File(STICKER_DIR, fileName)
-    }
+    fun getStickerFile(fileName: String): File = File(STICKER_DIR, fileName)
 
-    /**
-     * Rileva se un file WebP è animato controllando l'header del file.
-     * I WebP animati contengono il chunk "ANIM" nell'header.
-     * WhatsApp rifiuta sticker animati se animated_sticker_pack=0.
-     */
     private fun isAnimatedWebP(file: File): Boolean {
         if (file.length() < 20) return false
         return try {
             RandomAccessFile(file, "r").use { raf ->
                 val header = ByteArray(50)
                 raf.read(header)
-                // Cerca "ANIM" nei primi 50 byte
                 for (i in 0 until header.size - 3) {
                     if (header[i] == 'A'.code.toByte() &&
                         header[i+1] == 'N'.code.toByte() &&
                         header[i+2] == 'I'.code.toByte() &&
-                        header[i+3] == 'M'.code.toByte()) {
-                        return true
-                    }
+                        header[i+3] == 'M'.code.toByte()) return true
                 }
                 false
             }
-        } catch (e: Exception) {
-            false
-        }
+        } catch (e: Exception) { false }
     }
 }
