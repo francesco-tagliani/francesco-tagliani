@@ -60,7 +60,7 @@ object StickerPackLoader {
             ))
         }
 
-        animatedFiles.chunked(ANIMATED_PER_PACK).forEachIndexed { index, files ->
+        animatedFiles.chunked(STICKERS_PER_PACK).forEachIndexed { index, files ->
             if (files.size < 3) return@forEachIndexed
             val num    = index + 1
             val packId = "my_anim_pack_%03d".format(num)
