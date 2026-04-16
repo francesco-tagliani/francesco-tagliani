@@ -15,8 +15,8 @@ class StickerPackAdapter(
         RecyclerView.ViewHolder(binding.root) {
 
         fun bind(pack: StickerPack) {
-            binding.tvPackName.text = pack.name
-            binding.tvPackInfo.text = "${pack.stickers.size} sticker"
+            binding.tvPackName.text = if (pack.isAnimated) "🎬 ${pack.name}" else pack.name
+            binding.tvPackInfo.text = "${pack.stickers.size} sticker${if (pack.isAnimated) " (animati)" else ""}"
             binding.tvPackId.text = pack.identifier
 
             if (pack.isAddedToWhatsApp) {

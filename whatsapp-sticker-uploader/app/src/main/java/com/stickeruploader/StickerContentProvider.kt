@@ -184,7 +184,7 @@ class StickerContentProvider : ContentProvider() {
                 "",  // license_agreement_website
                 "1", // image_data_version
                 0,   // whatsapp_will_not_cache_stickers
-                0    // animated_sticker_pack
+                if (pack.isAnimated) 1 else 0  // animated_sticker_pack
             ))
         }
         context?.let { cursor.setNotificationUri(it.contentResolver, uri) }
