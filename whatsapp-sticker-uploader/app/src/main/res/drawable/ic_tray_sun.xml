@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+
+    <!-- Cerchio centrale (solo contorno, come nell'immagine) -->
+    <path
+        android:pathData="M48,22 A26,26 0 1,1 47.999,22 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="4"/>
+
+    <!-- Raggi (16 raggi uniformi) -->
+    <!-- 0° -->
+    <path android:pathData="M48,5 L48,13" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 22.5° -->
+    <path android:pathData="M63.6,9.4 L60.4,16.7" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 45° -->
+    <path android:pathData="M75.1,20.9 L69.8,26.2" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 67.5° -->
+    <path android:pathData="M86.6,32.4 L79.3,35.6" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 90° -->
+    <path android:pathData="M91,48 L83,48" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 112.5° -->
+    <path android:pathData="M86.6,63.6 L79.3,60.4" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 135° -->
+    <path android:pathData="M75.1,75.1 L69.8,69.8" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 157.5° -->
+    <path android:pathData="M63.6,86.6 L60.4,79.3" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 180° -->
+    <path android:pathData="M48,91 L48,83" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 202.5° -->
+    <path android:pathData="M32.4,86.6 L35.6,79.3" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 225° -->
+    <path android:pathData="M20.9,75.1 L26.2,69.8" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 247.5° -->
+    <path android:pathData="M9.4,63.6 L16.7,60.4" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 270° -->
+    <path android:pathData="M5,48 L13,48" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 292.5° -->
+    <path android:pathData="M9.4,32.4 L16.7,35.6" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 315° -->
+    <path android:pathData="M20.9,20.9 L26.2,26.2" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+    <!-- 337.5° -->
+    <path android:pathData="M32.4,9.4 L35.6,16.7" android:strokeColor="#000000" android:strokeWidth="3.5" android:strokeLineCap="round"/>
+
+</vector>
