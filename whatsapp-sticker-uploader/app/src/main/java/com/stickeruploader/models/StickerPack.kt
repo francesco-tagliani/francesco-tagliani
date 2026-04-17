@@ -1,10 +1,11 @@
 package com.stickeruploader.models
 
 data class StickerPack(
-    val identifier: String,        // es. "pack_001"
-    val name: String,              // es. "Sticker Pack 1"
+    val identifier: String,
+    val name: String,
     val publisher: String,
-    val trayImageFile: String,     // nome file dell'icona del pack (primo sticker)
+    val trayImageFile: String,
     val stickers: List<Sticker>,
+    val isAnimated: Boolean = false,
     var isAddedToWhatsApp: Boolean = false
 )

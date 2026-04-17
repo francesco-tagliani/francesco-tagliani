@@ -1,0 +1,65 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ claude/whatsapp-sticker-uploader-qzR5l ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Build APK with Gradle
+      run: |
+        cd whatsapp-sticker-uploader
+        chmod +x gradlew
+        ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
+        BUILD_EXIT=${PIPESTATUS[0]}
+        if [ $BUILD_EXIT -ne 0 ]; then
+          echo "=== BUILD FAILED - Full log ==="
+          cat build.log
+          exit $BUILD_EXIT
+        fi
+
+    - name: Verify APK exists
+      run: |
+        APK="whatsapp-sticker-uploader/app/build/outputs/apk/debug/app-debug.apk"
+        if [ -f "$APK" ]; then
+          echo "✅ APK creata con successo!"
+          ls -lh "$APK"
+        else
+          echo "❌ APK non trovata"
+          cat whatsapp-sticker-uploader/build.log
+          exit 1
+        fi
+
+    - name: Upload APK as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: WhatsApp-Sticker-Uploader-APK
+        path: whatsapp-sticker-uploader/app/build/outputs/apk/debug/app-debug.apk
+        if-no-files-found: error
+
+    - name: Publish APK as GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: latest-build
+        name: "Sticker Uploader - Ultima Build"
+        body: "APK aggiornata automaticamente ad ogni push."
+        files: whatsapp-sticker-uploader/app/build/outputs/apk/debug/app-debug.apk
+        make_latest: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

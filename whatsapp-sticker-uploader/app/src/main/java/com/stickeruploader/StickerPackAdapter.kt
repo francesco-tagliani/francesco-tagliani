@@ -1,22 +1,38 @@
 package com.stickeruploader
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.stickeruploader.databinding.ItemStickerPackBinding
 import com.stickeruploader.models.StickerPack
 
-class StickerPackAdapter(
-    private val packs: List<StickerPack>,
-    private val onAddClick: (StickerPack) -> Unit
-) : RecyclerView.Adapter<StickerPackAdapter.ViewHolder>() {
+sealed class PackItem {
+    data class Header(val title: String) : PackItem()
+    data class Pack(val stickerPack: StickerPack) : PackItem()
+}
 
-    inner class ViewHolder(private val binding: ItemStickerPackBinding) :
+class StickerPackAdapter(
+    private val items: MutableList<PackItem> = mutableListOf(),
+    private val onAddClick: (StickerPack) -> Unit
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+    companion object {
+        private const val TYPE_HEADER = 0
+        private const val TYPE_PACK   = 1
+    }
+
+    inner class HeaderViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val tvTitle: TextView = view.findViewById(R.id.tvSectionHeader)
+    }
+
+    inner class PackViewHolder(private val binding: ItemStickerPackBinding) :
         RecyclerView.ViewHolder(binding.root) {
 
         fun bind(pack: StickerPack) {
-            binding.tvPackName.text = pack.name
-            binding.tvPackInfo.text = "${pack.stickers.size} sticker"
+            binding.tvPackName.text = if (pack.isAnimated) "🎬 ${pack.name}" else pack.name
+            binding.tvPackInfo.text = "${pack.stickers.size} sticker${if (pack.isAnimated) " (animati)" else ""}"
             binding.tvPackId.text = pack.identifier
 
             if (pack.isAddedToWhatsApp) {
@@ -30,24 +46,63 @@ class StickerPackAdapter(
         }
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val binding = ItemStickerPackBinding.inflate(
-            LayoutInflater.from(parent.context), parent, false
-        )
-        return ViewHolder(binding)
+    override fun getItemViewType(position: Int) = when (items[position]) {
+        is PackItem.Header -> TYPE_HEADER
+        is PackItem.Pack   -> TYPE_PACK
     }
 
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        holder.bind(packs[position])
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        return if (viewType == TYPE_HEADER) {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_section_header, parent, false)
+            HeaderViewHolder(view)
+        } else {
+            val binding = ItemStickerPackBinding.inflate(
+                LayoutInflater.from(parent.context), parent, false
+            )
+            PackViewHolder(binding)
+        }
     }
 
-    override fun getItemCount(): Int = packs.size
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        when (val item = items[position]) {
+            is PackItem.Header -> (holder as HeaderViewHolder).tvTitle.text = item.title
+            is PackItem.Pack   -> (holder as PackViewHolder).bind(item.stickerPack)
+        }
+    }
+
+    override fun getItemCount() = items.size
+
+    fun updateItems(newItems: List<PackItem>) {
+        items.clear()
+        items.addAll(newItems)
+        notifyDataSetChanged()
+    }
+
+    fun getPacks(): List<StickerPack> =
+        items.filterIsInstance<PackItem.Pack>().map { it.stickerPack }
 
     fun markAsAdded(packId: String) {
-        val index = packs.indexOfFirst { it.identifier == packId }
-        if (index >= 0) {
-            packs[index].isAddedToWhatsApp = true
-            notifyItemChanged(index)
+        val index = items.indexOfFirst {
+            it is PackItem.Pack && it.stickerPack.identifier == packId
+        }
+        if (index < 0) return
+
+        items.removeAt(index)
+        notifyItemRemoved(index)
+
+        // Update header count, or remove it if no packs remain
+        val headerIndex = items.indexOfFirst { it is PackItem.Header }
+        if (headerIndex >= 0) {
+            val remaining = items.filterIsInstance<PackItem.Pack>()
+            if (remaining.isEmpty()) {
+                items.removeAt(headerIndex)
+                notifyItemRemoved(headerIndex)
+            } else {
+                val total = remaining.sumOf { it.stickerPack.stickers.size }
+                items[headerIndex] = PackItem.Header("🎬 Animati — ${remaining.size} pack, $total sticker")
+                notifyItemChanged(headerIndex)
+            }
         }
     }
 }
