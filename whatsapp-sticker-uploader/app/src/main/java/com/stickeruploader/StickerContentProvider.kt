@@ -57,12 +57,13 @@ class StickerContentProvider : ContentProvider() {
         }
     }
 
-    private val packsCache: List<StickerPack> by lazy {
-        Log.d(TAG, "Caricamento pack in lazy cache")
-        val packs = StickerPackLoader.loadAllPacks()
-        Log.d(TAG, "Cache: ${packs.size} pack caricati")
-        packs
-    }
+    private val packsCache: List<StickerPack>
+        get() {
+            val packs = StickerPackLoader.currentPacks
+            if (packs.isNotEmpty()) return packs
+            Log.d(TAG, "currentPacks vuoto, ricarico")
+            return StickerPackLoader.loadAllPacks()
+        }
 
     override fun onCreate(): Boolean {
         Log.d(TAG, "onCreate()")

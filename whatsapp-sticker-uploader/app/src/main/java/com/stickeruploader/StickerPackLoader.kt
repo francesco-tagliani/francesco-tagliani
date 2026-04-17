@@ -9,10 +9,14 @@ import java.io.RandomAccessFile
 
 object StickerPackLoader {
 
-    const val STICKERS_PER_PACK          = 30   // statici: 30 per pack
-    private const val ANIMATED_PER_PACK  = 3    // animati: 3 per pack (minimo WhatsApp)
-    private const val MAX_STATIC_SIZE_BYTES   = 100 * 1024L  // 100 KB
-    private const val MAX_ANIMATED_SIZE_BYTES = 500 * 1024L  // 500 KB
+    const val STICKERS_PER_PACK        = 30
+    const val MIN_STICKERS_PER_PACK    = 3
+    private const val MAX_STATIC_SIZE_BYTES   = 100 * 1024L
+    private const val MAX_ANIMATED_SIZE_BYTES = 500 * 1024L
+
+    // Pack correnti - aggiornati ad ogni loadAllPacks(), usati dal ContentProvider
+    var currentPacks: List<StickerPack> = emptyList()
+        private set
 
     val STICKER_DIR: File by lazy {
         File(
@@ -21,7 +25,7 @@ object StickerPackLoader {
         )
     }
 
-    fun loadAllPacks(): List<StickerPack> {
+    fun loadAllPacks(stickersPerPack: Int = STICKERS_PER_PACK): List<StickerPack> {
         if (!STICKER_DIR.exists() || !STICKER_DIR.isDirectory) return emptyList()
 
         val allFiles = STICKER_DIR.listFiles { file ->
@@ -49,8 +53,10 @@ object StickerPackLoader {
 
         val packs = mutableListOf<StickerPack>()
 
-        staticFiles.chunked(STICKERS_PER_PACK).forEachIndexed { index, files ->
-            if (files.size < 3) return@forEachIndexed
+        val size = stickersPerPack.coerceIn(MIN_STICKERS_PER_PACK, STICKERS_PER_PACK)
+
+        staticFiles.chunked(size).forEachIndexed { index, files ->
+            if (files.size < MIN_STICKERS_PER_PACK) return@forEachIndexed
             val num    = index + 1
             val packId = "my_sticker_pack_%03d".format(num)
             packs.add(StickerPack(
@@ -63,8 +69,8 @@ object StickerPackLoader {
             ))
         }
 
-        animatedFiles.chunked(ANIMATED_PER_PACK).forEachIndexed { index, files ->
-            if (files.size < 3) return@forEachIndexed
+        animatedFiles.chunked(size).forEachIndexed { index, files ->
+            if (files.size < MIN_STICKERS_PER_PACK) return@forEachIndexed
             val num    = index + 1
             val packId = "my_anim_pack_%03d".format(num)
             packs.add(StickerPack(
@@ -77,6 +83,7 @@ object StickerPackLoader {
             ))
         }
 
+        currentPacks = packs
         return packs
     }
 
