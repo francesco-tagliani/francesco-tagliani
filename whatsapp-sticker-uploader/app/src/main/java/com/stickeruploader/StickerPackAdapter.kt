@@ -86,9 +86,23 @@ class StickerPackAdapter(
         val index = items.indexOfFirst {
             it is PackItem.Pack && it.stickerPack.identifier == packId
         }
-        if (index >= 0) {
-            (items[index] as PackItem.Pack).stickerPack.isAddedToWhatsApp = true
-            notifyItemChanged(index)
+        if (index < 0) return
+
+        items.removeAt(index)
+        notifyItemRemoved(index)
+
+        // Update header count, or remove it if no packs remain
+        val headerIndex = items.indexOfFirst { it is PackItem.Header }
+        if (headerIndex >= 0) {
+            val remaining = items.filterIsInstance<PackItem.Pack>()
+            if (remaining.isEmpty()) {
+                items.removeAt(headerIndex)
+                notifyItemRemoved(headerIndex)
+            } else {
+                val total = remaining.sumOf { it.stickerPack.stickers.size }
+                items[headerIndex] = PackItem.Header("🎬 Animati — ${remaining.size} pack, $total sticker")
+                notifyItemChanged(headerIndex)
+            }
         }
     }
 }

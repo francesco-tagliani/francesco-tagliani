@@ -10,8 +10,9 @@ object StickerPackLoader {
 
     const val STICKERS_PER_PACK        = 30
     const val MIN_STICKERS_PER_PACK    = 3
-    private const val MAX_ANIMATED_SIZE_BYTES = 500 * 1024L
-    private const val MAX_DURATION_MS         = 3000
+    private const val MAX_ANIMATED_SIZE_BYTES  = 500 * 1024L
+    private const val MAX_DURATION_MS          = 10_000   // WhatsApp spec: max 10s total
+    private const val MIN_FRAME_DURATION_MS    = 8        // WhatsApp spec: min 8ms per frame
 
     var currentPacks: List<StickerPack> = emptyList()
         private set
@@ -46,13 +47,15 @@ object StickerPackLoader {
             val info = parseWebP(file)
             if (!info.animated) continue
 
-            val sizeOk     = size <= MAX_ANIMATED_SIZE_BYTES
-            val dimsOk     = info.width == 512 && info.height == 512
-            val loopOk     = info.loopCount == 0
-            // duration == -1 → nessun ANMF trovato (file malformato) → scarta
-            val durationOk = info.totalDurationMs in 1..MAX_DURATION_MS
+            val sizeOk      = size <= MAX_ANIMATED_SIZE_BYTES
+            val dimsOk      = info.width == 512 && info.height == 512
+            val loopOk      = info.loopCount == 0
+            // totalDurationMs == -1 → nessun ANMF trovato (file malformato) → scarta
+            val durationOk  = info.totalDurationMs in 1..MAX_DURATION_MS
+            // minFrameDurationMs == -1 → non calcolato (nessun ANMF); altrimenti ogni frame ≥ 8ms
+            val frameMinOk  = info.minFrameDurationMs < 0 || info.minFrameDurationMs >= MIN_FRAME_DURATION_MS
 
-            if (sizeOk && dimsOk && loopOk && durationOk) {
+            if (sizeOk && dimsOk && loopOk && durationOk && frameMinOk) {
                 animatedFiles.add(file)
                 validCount++
             } else {
@@ -62,7 +65,8 @@ object StickerPackLoader {
                     "[size=${size / 1024}KB ok=$sizeOk, " +
                     "${info.width}x${info.height} ok=$dimsOk, " +
                     "loop=${info.loopCount} ok=$loopOk, " +
-                    "duration=${info.totalDurationMs}ms ok=$durationOk]")
+                    "totDur=${info.totalDurationMs}ms ok=$durationOk, " +
+                    "minFrame=${info.minFrameDurationMs}ms ok=$frameMinOk]")
             }
         }
 
@@ -110,7 +114,8 @@ object StickerPackLoader {
         val width: Int,
         val height: Int,
         val loopCount: Int = -1,
-        val totalDurationMs: Int = -1
+        val totalDurationMs: Int = -1,
+        val minFrameDurationMs: Int = -1
     )
 
     private fun parseWebP(file: File): WebPInfo {
@@ -128,14 +133,15 @@ object StickerPackLoader {
                 if (riff[8] != 'W'.code.toByte() || riff[9] != 'E'.code.toByte() ||
                     riff[10] != 'B'.code.toByte() || riff[11] != 'P'.code.toByte()) return@use unknown
 
-                var offset         = 12L
-                var animated       = false
-                var width          = -1
-                var height         = -1
-                var loopCount      = -1
-                var totalDurationMs = 0
-                var anmfCount      = 0
-                val hdr            = ByteArray(8)
+                var offset           = 12L
+                var animated         = false
+                var width            = -1
+                var height           = -1
+                var loopCount        = -1
+                var totalDurationMs  = 0
+                var minFrameDurationMs = Int.MAX_VALUE
+                var anmfCount        = 0
+                val hdr              = ByteArray(8)
 
                 while (offset + 8 <= fileSize) {
                     raf.seek(offset)
@@ -164,7 +170,9 @@ object StickerPackLoader {
                             if (chunkSize >= 16) {
                                 val p = ByteArray(16)
                                 if (raf.read(p) >= 16) {
-                                    totalDurationMs += le24(p, 12)
+                                    val frameDur = le24(p, 12)
+                                    totalDurationMs += frameDur
+                                    if (frameDur < minFrameDurationMs) minFrameDurationMs = frameDur
                                     anmfCount++
                                 }
                             }
@@ -177,11 +185,12 @@ object StickerPackLoader {
                 }
 
                 WebPInfo(
-                    animated       = animated,
-                    width          = width,
-                    height         = height,
-                    loopCount      = loopCount,
-                    totalDurationMs = if (anmfCount > 0) totalDurationMs else -1
+                    animated           = animated,
+                    width              = width,
+                    height             = height,
+                    loopCount          = loopCount,
+                    totalDurationMs    = if (anmfCount > 0) totalDurationMs else -1,
+                    minFrameDurationMs = if (anmfCount > 0) minFrameDurationMs else -1
                 )
             }
         } catch (e: Exception) { unknown }

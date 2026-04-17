@@ -185,7 +185,7 @@ class MainActivity : AppCompatActivity() {
                 binding.recyclerView.visibility = View.VISIBLE
 
                 if (packs.isEmpty()) {
-                    binding.tvStatus.text = "Nessuno sticker animato valido trovato in:\n${StickerPackLoader.STICKER_DIR.absolutePath}\n\n✅ Validi: $validCount · ❌ Scartati (loop≠0 o dim≠512px): $invalidCount"
+                    binding.tvStatus.text = "Nessuno sticker animato valido trovato in:\n${StickerPackLoader.STICKER_DIR.absolutePath}\n\n✅ Validi: $validCount · ❌ Scartati: $invalidCount"
                     binding.btnAddAll.isEnabled = false
                 } else {
                     val total = packs.sumOf { it.stickers.size }
