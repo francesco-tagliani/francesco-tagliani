@@ -38,7 +38,9 @@ object StickerPackLoader {
             val animated = isAnimatedWebP(file)
 
             if (animated) {
-                if (size <= MAX_ANIMATED_SIZE_BYTES && is512x512(file)) animatedFiles.add(file)
+                // Per i file animati NON usiamo BitmapFactory (non legge correttamente WebP animati)
+                // Questi file vengono da WhatsApp quindi sono già 512x512
+                if (size <= MAX_ANIMATED_SIZE_BYTES) animatedFiles.add(file)
             } else {
                 if (size <= MAX_STATIC_SIZE_BYTES && is512x512(file)) staticFiles.add(file)
             }
@@ -113,12 +115,12 @@ object StickerPackLoader {
                 if (header[8] != 'W'.code.toByte() || header[9] != 'E'.code.toByte() ||
                     header[10] != 'B'.code.toByte() || header[11] != 'P'.code.toByte()) return false
 
-                // Metodo 1: VP8X con flag animazione (bit 2 = 0x04 secondo spec WebP)
+                // Metodo 1: VP8X con flag animazione (bit 1 = 0x02 per spec WebP e libwebp)
                 if (read >= 21 &&
                     header[12] == 'V'.code.toByte() && header[13] == 'P'.code.toByte() &&
                     header[14] == '8'.code.toByte() && header[15] == 'X'.code.toByte()) {
                     val flags = header[20].toInt() and 0xFF
-                    if ((flags and 0x04) != 0) return true  // bit 2 = Animation flag
+                    if ((flags and 0x02) != 0) return true  // ANIMATION_FLAG = 0x02
                 }
 
                 // Metodo 2: cerca il chunk ANIM nei byte letti
