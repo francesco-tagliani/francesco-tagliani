@@ -9,7 +9,8 @@ import java.io.RandomAccessFile
 
 object StickerPackLoader {
 
-    const val STICKERS_PER_PACK        = 30
+    const val STICKERS_PER_PACK          = 30   // statici: 30 per pack
+    private const val ANIMATED_PER_PACK  = 3    // animati: 3 per pack (minimo WhatsApp)
     private const val MAX_STATIC_SIZE_BYTES   = 100 * 1024L  // 100 KB
     private const val MAX_ANIMATED_SIZE_BYTES = 500 * 1024L  // 500 KB
 
@@ -62,7 +63,7 @@ object StickerPackLoader {
             ))
         }
 
-        animatedFiles.chunked(STICKERS_PER_PACK).forEachIndexed { index, files ->
+        animatedFiles.chunked(ANIMATED_PER_PACK).forEachIndexed { index, files ->
             if (files.size < 3) return@forEachIndexed
             val num    = index + 1
             val packId = "my_anim_pack_%03d".format(num)
