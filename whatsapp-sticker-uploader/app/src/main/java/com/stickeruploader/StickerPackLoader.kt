@@ -9,8 +9,7 @@ import java.io.RandomAccessFile
 
 object StickerPackLoader {
 
-    const val STICKERS_PER_PACK          = 30  // statici: 30 per pack
-    private const val ANIMATED_PER_PACK  = 3   // animati: minimo 3 per WhatsApp
+    const val STICKERS_PER_PACK        = 30
     private const val MAX_STATIC_SIZE_BYTES   = 100 * 1024L  // 100 KB
     private const val MAX_ANIMATED_SIZE_BYTES = 500 * 1024L  // 500 KB
 
@@ -35,12 +34,13 @@ object StickerPackLoader {
             val size = file.length()
             if (size <= 0L) continue
 
-            val animated = isAnimatedWebP(file)
+            val info = parseWebP(file)
 
-            if (animated) {
-                // Per i file animati NON usiamo BitmapFactory (non legge correttamente WebP animati)
-                // Questi file vengono da WhatsApp quindi sono già 512x512
-                if (size <= MAX_ANIMATED_SIZE_BYTES) animatedFiles.add(file)
+            if (info.animated) {
+                // Dimensioni lette direttamente dall'header VP8X (non si usa BitmapFactory)
+                if (size <= MAX_ANIMATED_SIZE_BYTES && info.width == 512 && info.height == 512) {
+                    animatedFiles.add(file)
+                }
             } else {
                 if (size <= MAX_STATIC_SIZE_BYTES && is512x512(file)) staticFiles.add(file)
             }
@@ -81,10 +81,6 @@ object StickerPackLoader {
 
     fun getStickerFile(fileName: String): File = File(STICKER_DIR, fileName)
 
-    /**
-     * Controlla se il file è esattamente 512x512 pixel.
-     * Usa inJustDecodeBounds per leggere solo l'header, senza caricare l'immagine in RAM.
-     */
     private fun is512x512(file: File): Boolean {
         return try {
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -96,42 +92,73 @@ object StickerPackLoader {
     }
 
     /**
-     * Rileva WebP animati controllando:
-     * 1. Il flag animazione nel chunk VP8X (metodo preciso)
-     * 2. La presenza del chunk ANIM (fallback)
+     * Legge l'header WebP e restituisce: se è animato, larghezza e altezza del canvas.
+     * Per i WebP animati con chunk VP8X, le dimensioni vengono lette direttamente dall'header
+     * (BitmapFactory non restituisce dimensioni corrette per WebP animati).
+     *
+     * Struttura VP8X (offset dal byte 0 del file):
+     *   [12-15] = "VP8X"
+     *   [16-19] = chunk size (10 byte, little-endian)
+     *   [20]    = flags (bit 1 = 0x02 → animazione)
+     *   [21-23] = riservato
+     *   [24-26] = Canvas Width  - 1 (24-bit little-endian)
+     *   [27-29] = Canvas Height - 1 (24-bit little-endian)
      */
-    fun isAnimatedWebP(file: File): Boolean {
-        if (file.length() < 20) return false
+    private data class WebPInfo(val animated: Boolean, val width: Int, val height: Int)
+
+    private fun parseWebP(file: File): WebPInfo {
+        val unknown = WebPInfo(false, -1, -1)
+        if (file.length() < 30) return unknown
         return try {
             RandomAccessFile(file, "r").use { raf ->
-                // Legge i primi 256 byte per trovare VP8X e ANIM
                 val header = ByteArray(256)
                 val read = raf.read(header)
-                if (read < 12) return false
+                if (read < 12) return unknown
 
-                // Verifica firma RIFF...WEBP
+                // Firma RIFF...WEBP
                 if (header[0] != 'R'.code.toByte() || header[1] != 'I'.code.toByte() ||
-                    header[2] != 'F'.code.toByte() || header[3] != 'F'.code.toByte()) return false
+                    header[2] != 'F'.code.toByte() || header[3] != 'F'.code.toByte()) return unknown
                 if (header[8] != 'W'.code.toByte() || header[9] != 'E'.code.toByte() ||
-                    header[10] != 'B'.code.toByte() || header[11] != 'P'.code.toByte()) return false
+                    header[10] != 'B'.code.toByte() || header[11] != 'P'.code.toByte()) return unknown
 
-                // Metodo 1: VP8X con flag animazione (bit 1 = 0x02 per spec WebP e libwebp)
-                if (read >= 21 &&
+                // Chunk VP8X presente: legge flag e dimensioni canvas
+                if (read >= 30 &&
                     header[12] == 'V'.code.toByte() && header[13] == 'P'.code.toByte() &&
                     header[14] == '8'.code.toByte() && header[15] == 'X'.code.toByte()) {
+
                     val flags = header[20].toInt() and 0xFF
-                    if ((flags and 0x02) != 0) return true  // ANIMATION_FLAG = 0x02
+                    val animated = (flags and 0x02) != 0  // ANIMATION_FLAG per spec WebP / libwebp
+
+                    // Canvas Width - 1 e Canvas Height - 1 (24-bit little-endian)
+                    val w = ((header[24].toInt() and 0xFF))       or
+                            ((header[25].toInt() and 0xFF) shl 8) or
+                            ((header[26].toInt() and 0xFF) shl 16)
+                    val h = ((header[27].toInt() and 0xFF))       or
+                            ((header[28].toInt() and 0xFF) shl 8) or
+                            ((header[29].toInt() and 0xFF) shl 16)
+
+                    return WebPInfo(animated, w + 1, h + 1)
                 }
 
-                // Metodo 2: cerca il chunk ANIM nei byte letti
+                // Nessun chunk VP8X: cerca chunk ANIM come fallback (formato animato senza VP8X)
                 for (i in 0..read - 4) {
                     if (header[i]   == 'A'.code.toByte() &&
                         header[i+1] == 'N'.code.toByte() &&
                         header[i+2] == 'I'.code.toByte() &&
-                        header[i+3] == 'M'.code.toByte()) return true
+                        header[i+3] == 'M'.code.toByte()) {
+                        // ANIM trovato ma senza VP8X: dimensioni sconosciute, include se BitmapFactory riesce
+                        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(file.absolutePath, opts)
+                        val bw = if (opts.outWidth > 0) opts.outWidth else 512
+                        val bh = if (opts.outHeight > 0) opts.outHeight else 512
+                        return WebPInfo(true, bw, bh)
+                    }
                 }
-                false
+
+                unknown
             }
-        } catch (e: Exception) { false }
+        } catch (e: Exception) { unknown }
     }
+
+    fun isAnimatedWebP(file: File): Boolean = parseWebP(file).animated
 }
