@@ -11,11 +11,16 @@ object StickerPackLoader {
 
     const val STICKERS_PER_PACK        = 30
     const val MIN_STICKERS_PER_PACK    = 3
-    private const val MAX_STATIC_SIZE_BYTES   = 100 * 1024L
     private const val MAX_ANIMATED_SIZE_BYTES = 500 * 1024L
 
     // Pack correnti - aggiornati ad ogni loadAllPacks(), usati dal ContentProvider
     var currentPacks: List<StickerPack> = emptyList()
+        private set
+
+    // Statistiche ultima validazione
+    var lastValidCount: Int = 0
+        private set
+    var lastInvalidCount: Int = 0
         private set
 
     val STICKER_DIR: File by lazy {
@@ -32,7 +37,9 @@ object StickerPackLoader {
             file.isFile && file.name.lowercase().endsWith(".webp")
         }?.sortedBy { it.name } ?: emptyList()
 
-        val staticFiles   = mutableListOf<File>()
+        var validCount = 0
+        var invalidCount = 0
+
         val animatedFiles = mutableListOf<File>()
 
         for (file in allFiles) {
@@ -42,32 +49,33 @@ object StickerPackLoader {
             val info = parseWebP(file)
 
             if (info.animated) {
-                // Dimensioni lette direttamente dall'header VP8X (non si usa BitmapFactory)
-                if (size <= MAX_ANIMATED_SIZE_BYTES && info.width == 512 && info.height == 512) {
+                // Valida ogni sticker individualmente secondo i requisiti WhatsApp:
+                // - dimensioni 512x512
+                // - dimensione ≤ 500KB
+                // - loop count = 0 (loop infinito)
+                val sizeOk = size <= MAX_ANIMATED_SIZE_BYTES
+                val dimsOk = info.width == 512 && info.height == 512
+                val loopOk = info.loopCount == 0
+
+                if (sizeOk && dimsOk && loopOk) {
                     animatedFiles.add(file)
+                    validCount++
+                } else {
+                    invalidCount++
+                    AppLogger.w("StickerPackLoader",
+                        "Sticker scartato: ${file.name} " +
+                        "[size=${size/1024}KB ok=$sizeOk, " +
+                        "${info.width}x${info.height} ok=$dimsOk, " +
+                        "loop=${info.loopCount} ok=$loopOk]")
                 }
-            } else {
-                if (size <= MAX_STATIC_SIZE_BYTES && is512x512(file)) staticFiles.add(file)
             }
         }
 
+        lastValidCount = validCount
+        lastInvalidCount = invalidCount
+
         val packs = mutableListOf<StickerPack>()
-
         val size = stickersPerPack.coerceIn(MIN_STICKERS_PER_PACK, STICKERS_PER_PACK)
-
-        staticFiles.chunked(size).forEachIndexed { index, files ->
-            if (files.size < MIN_STICKERS_PER_PACK) return@forEachIndexed
-            val num    = index + 1
-            val packId = "my_sticker_pack_%03d".format(num)
-            packs.add(StickerPack(
-                identifier    = packId,
-                name          = "New Stiker $num",
-                publisher     = "Il mio dispositivo",
-                trayImageFile = "${packId}_tray.webp",
-                stickers      = files.map { Sticker(it.name, listOf("😀")) },
-                isAnimated    = false
-            ))
-        }
 
         animatedFiles.chunked(size).forEachIndexed { index, files ->
             if (files.size < MIN_STICKERS_PER_PACK) return@forEachIndexed
@@ -100,19 +108,20 @@ object StickerPackLoader {
     }
 
     /**
-     * Legge l'header WebP e restituisce: se è animato, larghezza e altezza del canvas.
-     * Per i WebP animati con chunk VP8X, le dimensioni vengono lette direttamente dall'header
-     * (BitmapFactory non restituisce dimensioni corrette per WebP animati).
+     * Legge l'header WebP e restituisce: se è animato, larghezza e altezza del canvas, loop count.
      *
-     * Struttura VP8X (offset dal byte 0 del file):
-     *   [12-15] = "VP8X"
-     *   [16-19] = chunk size (10 byte, little-endian)
-     *   [20]    = flags (bit 1 = 0x02 → animazione)
-     *   [21-23] = riservato
-     *   [24-26] = Canvas Width  - 1 (24-bit little-endian)
-     *   [27-29] = Canvas Height - 1 (24-bit little-endian)
+     * Struttura (offset dal byte 0):
+     *   [0-3]   = "RIFF"
+     *   [8-11]  = "WEBP"
+     *   [12-15] = "VP8X"  (se presente)
+     *   [20]    = flags (bit 0x02 = animazione)
+     *   [24-26] = Canvas Width  - 1 (24-bit LE)
+     *   [27-29] = Canvas Height - 1 (24-bit LE)
+     *   [30-33] = "ANIM"  (se animato)
+     *   [38-41] = background color
+     *   [42-43] = loop count (0 = infinito, richiesto da WhatsApp)
      */
-    private data class WebPInfo(val animated: Boolean, val width: Int, val height: Int)
+    private data class WebPInfo(val animated: Boolean, val width: Int, val height: Int, val loopCount: Int = -1)
 
     private fun parseWebP(file: File): WebPInfo {
         val unknown = WebPInfo(false, -1, -1)
@@ -130,7 +139,7 @@ object StickerPackLoader {
                 if (header[8] != 'W'.code.toByte() || header[9] != 'E'.code.toByte() ||
                     header[10] != 'B'.code.toByte() || header[11] != 'P'.code.toByte()) return@use unknown
 
-                // Chunk VP8X presente: legge flag e dimensioni canvas
+                // Chunk VP8X presente: legge flag, dimensioni canvas e loop count
                 if (read >= 30 &&
                     header[12] == 'V'.code.toByte() && header[13] == 'P'.code.toByte() &&
                     header[14] == '8'.code.toByte() && header[15] == 'X'.code.toByte()) {
@@ -138,7 +147,6 @@ object StickerPackLoader {
                     val flags = header[20].toInt() and 0xFF
                     val animated = (flags and 0x02) != 0
 
-                    // Canvas Width - 1 e Canvas Height - 1 (24-bit little-endian)
                     val w = (header[24].toInt() and 0xFF) or
                             ((header[25].toInt() and 0xFF) shl 8) or
                             ((header[26].toInt() and 0xFF) shl 16)
@@ -146,7 +154,16 @@ object StickerPackLoader {
                             ((header[28].toInt() and 0xFF) shl 8) or
                             ((header[29].toInt() and 0xFF) shl 16)
 
-                    return@use WebPInfo(animated, w + 1, h + 1)
+                    // Legge loop count dal chunk ANIM (offset 30, se abbastanza dati)
+                    var loopCount = -1
+                    if (animated && read >= 44 &&
+                        header[30] == 'A'.code.toByte() && header[31] == 'N'.code.toByte() &&
+                        header[32] == 'I'.code.toByte() && header[33] == 'M'.code.toByte()) {
+                        loopCount = (header[42].toInt() and 0xFF) or
+                                    ((header[43].toInt() and 0xFF) shl 8)
+                    }
+
+                    return@use WebPInfo(animated, w + 1, h + 1, loopCount)
                 }
 
                 // Nessun VP8X: cerca ANIM come fallback
@@ -160,7 +177,7 @@ object StickerPackLoader {
                         BitmapFactory.decodeFile(file.absolutePath, opts)
                         val bw = if (opts.outWidth > 0) opts.outWidth else 512
                         val bh = if (opts.outHeight > 0) opts.outHeight else 512
-                        animResult = WebPInfo(true, bw, bh)
+                        animResult = WebPInfo(true, bw, bh, -1)
                         break
                     }
                 }

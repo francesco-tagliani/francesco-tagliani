@@ -142,25 +142,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadStickers() {
         binding.progressBar.visibility = View.VISIBLE
-        binding.tvStatus.text = "Caricamento sticker in corso..."
+        binding.tvStatus.text = "Validazione sticker animati in corso..."
         binding.recyclerView.visibility = View.GONE
 
         Thread {
-            AppLogger.separator("CARICAMENTO STICKER (${stickersPerPack} per pack)")
+            AppLogger.separator("CARICAMENTO STICKER ANIMATI (${stickersPerPack} per pack)")
             val packs = StickerPackLoader.loadAllPacks(stickersPerPack)
-            AppLogger.i(TAG, "Pack caricati: ${packs.size}")
-
-            val staticPacks  = packs.filter { !it.isAnimated }
-            val animPacks    = packs.filter { it.isAnimated }
+            val validCount = StickerPackLoader.lastValidCount
+            val invalidCount = StickerPackLoader.lastInvalidCount
+            AppLogger.i(TAG, "Pack animati caricati: ${packs.size} (✅$validCount sticker validi, ❌$invalidCount scartati)")
 
             val items = mutableListOf<PackItem>()
-            if (staticPacks.isNotEmpty()) {
-                items.add(PackItem.Header("📷 Statici — ${staticPacks.size} pack, ${staticPacks.sumOf { it.stickers.size }} sticker"))
-                staticPacks.forEach { items.add(PackItem.Pack(it)) }
-            }
-            if (animPacks.isNotEmpty()) {
-                items.add(PackItem.Header("🎬 Animati — ${animPacks.size} pack, ${animPacks.sumOf { it.stickers.size }} sticker"))
-                animPacks.forEach { items.add(PackItem.Pack(it)) }
+            if (packs.isNotEmpty()) {
+                items.add(PackItem.Header("🎬 Animati — ${packs.size} pack, ${packs.sumOf { it.stickers.size }} sticker"))
+                packs.forEach { items.add(PackItem.Pack(it)) }
             }
 
             runOnUiThread {
@@ -169,11 +164,11 @@ class MainActivity : AppCompatActivity() {
                 binding.recyclerView.visibility = View.VISIBLE
 
                 if (packs.isEmpty()) {
-                    binding.tvStatus.text = "Nessun file .webp trovato in:\n${StickerPackLoader.STICKER_DIR.absolutePath}"
+                    binding.tvStatus.text = "Nessuno sticker animato valido trovato in:\n${StickerPackLoader.STICKER_DIR.absolutePath}\n\n✅ Validi: $validCount · ❌ Scartati (loop≠0 o dim≠512px): $invalidCount"
                     binding.btnAddAll.isEnabled = false
                 } else {
                     val total = packs.sumOf { it.stickers.size }
-                    binding.tvStatus.text = "${staticPacks.size} pack statici · ${animPacks.size} pack animati · $total sticker totali"
+                    binding.tvStatus.text = "${packs.size} pack animati · $total sticker · ✅$validCount validi · ❌$invalidCount scartati"
                     binding.btnAddAll.isEnabled = true
                 }
             }
