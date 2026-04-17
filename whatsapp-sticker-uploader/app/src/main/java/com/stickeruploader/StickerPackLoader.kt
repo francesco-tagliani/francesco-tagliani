@@ -113,13 +113,14 @@ object StickerPackLoader {
             RandomAccessFile(file, "r").use { raf ->
                 val header = ByteArray(256)
                 val read = raf.read(header)
-                if (read < 12) return unknown
+
+                if (read < 12) return@use unknown
 
                 // Firma RIFF...WEBP
                 if (header[0] != 'R'.code.toByte() || header[1] != 'I'.code.toByte() ||
-                    header[2] != 'F'.code.toByte() || header[3] != 'F'.code.toByte()) return unknown
+                    header[2] != 'F'.code.toByte() || header[3] != 'F'.code.toByte()) return@use unknown
                 if (header[8] != 'W'.code.toByte() || header[9] != 'E'.code.toByte() ||
-                    header[10] != 'B'.code.toByte() || header[11] != 'P'.code.toByte()) return unknown
+                    header[10] != 'B'.code.toByte() || header[11] != 'P'.code.toByte()) return@use unknown
 
                 // Chunk VP8X presente: legge flag e dimensioni canvas
                 if (read >= 30 &&
@@ -127,35 +128,35 @@ object StickerPackLoader {
                     header[14] == '8'.code.toByte() && header[15] == 'X'.code.toByte()) {
 
                     val flags = header[20].toInt() and 0xFF
-                    val animated = (flags and 0x02) != 0  // ANIMATION_FLAG per spec WebP / libwebp
+                    val animated = (flags and 0x02) != 0
 
                     // Canvas Width - 1 e Canvas Height - 1 (24-bit little-endian)
-                    val w = ((header[24].toInt() and 0xFF))       or
+                    val w = (header[24].toInt() and 0xFF) or
                             ((header[25].toInt() and 0xFF) shl 8) or
                             ((header[26].toInt() and 0xFF) shl 16)
-                    val h = ((header[27].toInt() and 0xFF))       or
+                    val h = (header[27].toInt() and 0xFF) or
                             ((header[28].toInt() and 0xFF) shl 8) or
                             ((header[29].toInt() and 0xFF) shl 16)
 
-                    return WebPInfo(animated, w + 1, h + 1)
+                    return@use WebPInfo(animated, w + 1, h + 1)
                 }
 
-                // Nessun chunk VP8X: cerca chunk ANIM come fallback (formato animato senza VP8X)
+                // Nessun VP8X: cerca ANIM come fallback
+                var animResult: WebPInfo = unknown
                 for (i in 0..read - 4) {
                     if (header[i]   == 'A'.code.toByte() &&
                         header[i+1] == 'N'.code.toByte() &&
                         header[i+2] == 'I'.code.toByte() &&
                         header[i+3] == 'M'.code.toByte()) {
-                        // ANIM trovato ma senza VP8X: dimensioni sconosciute, include se BitmapFactory riesce
                         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeFile(file.absolutePath, opts)
                         val bw = if (opts.outWidth > 0) opts.outWidth else 512
                         val bh = if (opts.outHeight > 0) opts.outHeight else 512
-                        return WebPInfo(true, bw, bh)
+                        animResult = WebPInfo(true, bw, bh)
+                        break
                     }
                 }
-
-                unknown
+                animResult
             }
         } catch (e: Exception) { unknown }
     }
