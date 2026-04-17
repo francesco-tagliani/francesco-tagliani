@@ -1,6 +1,5 @@
 package com.stickeruploader
 
-import android.graphics.BitmapFactory
 import android.os.Environment
 import com.stickeruploader.models.Sticker
 import com.stickeruploader.models.StickerPack
@@ -12,12 +11,11 @@ object StickerPackLoader {
     const val STICKERS_PER_PACK        = 30
     const val MIN_STICKERS_PER_PACK    = 3
     private const val MAX_ANIMATED_SIZE_BYTES = 500 * 1024L
+    private const val MAX_DURATION_MS         = 3000
 
-    // Pack correnti - aggiornati ad ogni loadAllPacks(), usati dal ContentProvider
     var currentPacks: List<StickerPack> = emptyList()
         private set
 
-    // Statistiche ultima validazione
     var lastValidCount: Int = 0
         private set
     var lastInvalidCount: Int = 0
@@ -39,7 +37,6 @@ object StickerPackLoader {
 
         var validCount = 0
         var invalidCount = 0
-
         val animatedFiles = mutableListOf<File>()
 
         for (file in allFiles) {
@@ -47,37 +44,35 @@ object StickerPackLoader {
             if (size <= 0L) continue
 
             val info = parseWebP(file)
+            if (!info.animated) continue
 
-            if (info.animated) {
-                // Valida ogni sticker individualmente secondo i requisiti WhatsApp:
-                // - dimensioni 512x512
-                // - dimensione ≤ 500KB
-                // - loop count = 0 (loop infinito)
-                val sizeOk = size <= MAX_ANIMATED_SIZE_BYTES
-                val dimsOk = info.width == 512 && info.height == 512
-                val loopOk = info.loopCount == 0
+            val sizeOk     = size <= MAX_ANIMATED_SIZE_BYTES
+            val dimsOk     = info.width == 512 && info.height == 512
+            val loopOk     = info.loopCount == 0
+            // duration == -1 → nessun ANMF trovato (file malformato) → scarta
+            val durationOk = info.totalDurationMs in 1..MAX_DURATION_MS
 
-                if (sizeOk && dimsOk && loopOk) {
-                    animatedFiles.add(file)
-                    validCount++
-                } else {
-                    invalidCount++
-                    AppLogger.w("StickerPackLoader",
-                        "Sticker scartato: ${file.name} " +
-                        "[size=${size/1024}KB ok=$sizeOk, " +
-                        "${info.width}x${info.height} ok=$dimsOk, " +
-                        "loop=${info.loopCount} ok=$loopOk]")
-                }
+            if (sizeOk && dimsOk && loopOk && durationOk) {
+                animatedFiles.add(file)
+                validCount++
+            } else {
+                invalidCount++
+                AppLogger.w("StickerPackLoader",
+                    "Sticker scartato: ${file.name} " +
+                    "[size=${size / 1024}KB ok=$sizeOk, " +
+                    "${info.width}x${info.height} ok=$dimsOk, " +
+                    "loop=${info.loopCount} ok=$loopOk, " +
+                    "duration=${info.totalDurationMs}ms ok=$durationOk]")
             }
         }
 
-        lastValidCount = validCount
+        lastValidCount   = validCount
         lastInvalidCount = invalidCount
 
         val packs = mutableListOf<StickerPack>()
-        val size = stickersPerPack.coerceIn(MIN_STICKERS_PER_PACK, STICKERS_PER_PACK)
+        val packSize = stickersPerPack.coerceIn(MIN_STICKERS_PER_PACK, STICKERS_PER_PACK)
 
-        animatedFiles.chunked(size).forEachIndexed { index, files ->
+        animatedFiles.chunked(packSize).forEachIndexed { index, files ->
             if (files.size < MIN_STICKERS_PER_PACK) return@forEachIndexed
             val num    = index + 1
             val packId = "my_anim_pack_%03d".format(num)
@@ -97,94 +92,111 @@ object StickerPackLoader {
 
     fun getStickerFile(fileName: String): File = File(STICKER_DIR, fileName)
 
-    private fun is512x512(file: File): Boolean {
-        return try {
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.absolutePath, opts)
-            opts.outWidth == 512 && opts.outHeight == 512
-        } catch (e: Exception) {
-            false
-        }
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    // WebP binary parser: legge VP8X (animazione, dimensioni), ANIM (loop),
+    // e somma le durate di tutti i chunk ANMF per il totale animazione.
+    //
+    // Struttura RIFF/WEBP:
+    //   [0-3]   RIFF  [4-7] fileSize-8  [8-11] WEBP
+    //   [12+]   chunks: [4 FourCC][4 size LE][payload]
+    //
+    // VP8X payload:  [0] flags (bit1=ANIM)  [4-6] width-1  [7-9] height-1
+    // ANIM payload:  [0-3] bgColor  [4-5] loopCount
+    // ANMF payload:  [0-5] frameXY  [6-11] frameDims  [12-14] duration ms  [15] flags
+    // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Legge l'header WebP e restituisce: se è animato, larghezza e altezza del canvas, loop count.
-     *
-     * Struttura (offset dal byte 0):
-     *   [0-3]   = "RIFF"
-     *   [8-11]  = "WEBP"
-     *   [12-15] = "VP8X"  (se presente)
-     *   [20]    = flags (bit 0x02 = animazione)
-     *   [24-26] = Canvas Width  - 1 (24-bit LE)
-     *   [27-29] = Canvas Height - 1 (24-bit LE)
-     *   [30-33] = "ANIM"  (se animato)
-     *   [38-41] = background color
-     *   [42-43] = loop count (0 = infinito, richiesto da WhatsApp)
-     */
-    private data class WebPInfo(val animated: Boolean, val width: Int, val height: Int, val loopCount: Int = -1)
+    private data class WebPInfo(
+        val animated: Boolean,
+        val width: Int,
+        val height: Int,
+        val loopCount: Int = -1,
+        val totalDurationMs: Int = -1
+    )
 
     private fun parseWebP(file: File): WebPInfo {
-        val unknown = WebPInfo(false, -1, -1)
-        if (file.length() < 30) return unknown
+        val unknown  = WebPInfo(false, -1, -1)
+        val fileSize = file.length()
+        if (fileSize < 12) return unknown
+
         return try {
             RandomAccessFile(file, "r").use { raf ->
-                val header = ByteArray(256)
-                val read = raf.read(header)
+                // Verifica firma RIFF/WEBP
+                val riff = ByteArray(12)
+                if (raf.read(riff) < 12) return@use unknown
+                if (riff[0] != 'R'.code.toByte() || riff[1] != 'I'.code.toByte() ||
+                    riff[2] != 'F'.code.toByte() || riff[3] != 'F'.code.toByte()) return@use unknown
+                if (riff[8] != 'W'.code.toByte() || riff[9] != 'E'.code.toByte() ||
+                    riff[10] != 'B'.code.toByte() || riff[11] != 'P'.code.toByte()) return@use unknown
 
-                if (read < 12) return@use unknown
+                var offset         = 12L
+                var animated       = false
+                var width          = -1
+                var height         = -1
+                var loopCount      = -1
+                var totalDurationMs = 0
+                var anmfCount      = 0
+                val hdr            = ByteArray(8)
 
-                // Firma RIFF...WEBP
-                if (header[0] != 'R'.code.toByte() || header[1] != 'I'.code.toByte() ||
-                    header[2] != 'F'.code.toByte() || header[3] != 'F'.code.toByte()) return@use unknown
-                if (header[8] != 'W'.code.toByte() || header[9] != 'E'.code.toByte() ||
-                    header[10] != 'B'.code.toByte() || header[11] != 'P'.code.toByte()) return@use unknown
+                while (offset + 8 <= fileSize) {
+                    raf.seek(offset)
+                    if (raf.read(hdr) < 8) break
 
-                // Chunk VP8X presente: legge flag, dimensioni canvas e loop count
-                if (read >= 30 &&
-                    header[12] == 'V'.code.toByte() && header[13] == 'P'.code.toByte() &&
-                    header[14] == '8'.code.toByte() && header[15] == 'X'.code.toByte()) {
+                    val fourCC    = String(hdr, 0, 4, Charsets.US_ASCII)
+                    val chunkSize = le32(hdr, 4)
+                    if (chunkSize < 0) break
 
-                    val flags = header[20].toInt() and 0xFF
-                    val animated = (flags and 0x02) != 0
-
-                    val w = (header[24].toInt() and 0xFF) or
-                            ((header[25].toInt() and 0xFF) shl 8) or
-                            ((header[26].toInt() and 0xFF) shl 16)
-                    val h = (header[27].toInt() and 0xFF) or
-                            ((header[28].toInt() and 0xFF) shl 8) or
-                            ((header[29].toInt() and 0xFF) shl 16)
-
-                    // Legge loop count dal chunk ANIM (offset 30, se abbastanza dati)
-                    var loopCount = -1
-                    if (animated && read >= 44 &&
-                        header[30] == 'A'.code.toByte() && header[31] == 'N'.code.toByte() &&
-                        header[32] == 'I'.code.toByte() && header[33] == 'M'.code.toByte()) {
-                        loopCount = (header[42].toInt() and 0xFF) or
-                                    ((header[43].toInt() and 0xFF) shl 8)
+                    when (fourCC) {
+                        "VP8X" -> {
+                            val p = ByteArray(10)
+                            if (raf.read(p) >= 10) {
+                                animated = (p[0].toInt() and 0xFF and 0x02) != 0
+                                width    = le24(p, 4) + 1
+                                height   = le24(p, 7) + 1
+                            }
+                        }
+                        "ANIM" -> {
+                            if (chunkSize >= 6) {
+                                val p = ByteArray(6)
+                                if (raf.read(p) >= 6) loopCount = le16(p, 4)
+                            }
+                        }
+                        "ANMF" -> {
+                            if (chunkSize >= 16) {
+                                val p = ByteArray(16)
+                                if (raf.read(p) >= 16) {
+                                    totalDurationMs += le24(p, 12)
+                                    anmfCount++
+                                }
+                            }
+                        }
                     }
 
-                    return@use WebPInfo(animated, w + 1, h + 1, loopCount)
+                    val advance = 8L + chunkSize + (chunkSize and 1)
+                    if (advance <= 8L) break   // protezione loop infinito
+                    offset += advance
                 }
 
-                // Nessun VP8X: cerca ANIM come fallback
-                var animResult: WebPInfo = unknown
-                for (i in 0..read - 4) {
-                    if (header[i]   == 'A'.code.toByte() &&
-                        header[i+1] == 'N'.code.toByte() &&
-                        header[i+2] == 'I'.code.toByte() &&
-                        header[i+3] == 'M'.code.toByte()) {
-                        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeFile(file.absolutePath, opts)
-                        val bw = if (opts.outWidth > 0) opts.outWidth else 512
-                        val bh = if (opts.outHeight > 0) opts.outHeight else 512
-                        animResult = WebPInfo(true, bw, bh, -1)
-                        break
-                    }
-                }
-                animResult
+                WebPInfo(
+                    animated       = animated,
+                    width          = width,
+                    height         = height,
+                    loopCount      = loopCount,
+                    totalDurationMs = if (anmfCount > 0) totalDurationMs else -1
+                )
             }
         } catch (e: Exception) { unknown }
     }
+
+    private fun le32(b: ByteArray, o: Int): Int =
+        (b[o].toInt() and 0xFF) or ((b[o+1].toInt() and 0xFF) shl 8) or
+        ((b[o+2].toInt() and 0xFF) shl 16) or ((b[o+3].toInt() and 0xFF) shl 24)
+
+    private fun le24(b: ByteArray, o: Int): Int =
+        (b[o].toInt() and 0xFF) or ((b[o+1].toInt() and 0xFF) shl 8) or
+        ((b[o+2].toInt() and 0xFF) shl 16)
+
+    private fun le16(b: ByteArray, o: Int): Int =
+        (b[o].toInt() and 0xFF) or ((b[o+1].toInt() and 0xFF) shl 8)
 
     fun isAnimatedWebP(file: File): Boolean = parseWebP(file).animated
 }
