@@ -104,6 +104,27 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnReload.setOnClickListener { checkPermissionsAndLoad() }
+
+        binding.btnShareLog.setOnClickListener { shareLog() }
+    }
+
+    private fun shareLog() {
+        val path = AppLogger.getLogFilePath()
+        val file = java.io.File(path)
+        if (!file.exists()) {
+            Toast.makeText(this, "File di log non trovato", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val text = try { file.readText() } catch (e: Exception) {
+            Toast.makeText(this, "Errore lettura log: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "StickerUploader Log")
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(intent, "Condividi log"))
     }
 
     private fun checkPermissionsAndLoad() {

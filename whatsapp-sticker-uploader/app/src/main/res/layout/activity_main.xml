@@ -49,6 +49,14 @@ android:layout_width="match_parent"
             android:textSize="13sp" />
 
         <Button
+            android:id="@+id/btnShareLog"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="📋 Log"
+            android:textSize="13sp" />
+
+        <Button
             android:id="@+id/btnAddAll"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
