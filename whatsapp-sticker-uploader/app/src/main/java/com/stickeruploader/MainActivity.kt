@@ -15,7 +15,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.google.android.material.slider.Slider
+import android.widget.SeekBar
 import com.stickeruploader.databinding.ActivityMainBinding
 import com.stickeruploader.models.StickerPack
 
@@ -66,17 +66,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupSlider() {
-        binding.sliderPackSize.value = stickersPerPack.toFloat()
+        // SeekBar: progress 0..27 → valore reale 3..30
+        binding.seekBarPackSize.progress = stickersPerPack - 3
         binding.tvPackSize.text = "Sticker per pacchetto: $stickersPerPack"
 
-        binding.sliderPackSize.addOnChangeListener { _, value, _ ->
-            stickersPerPack = value.toInt()
-            binding.tvPackSize.text = "Sticker per pacchetto: $stickersPerPack"
-        }
-
-        binding.sliderPackSize.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
-            override fun onStartTrackingTouch(slider: Slider) {}
-            override fun onStopTrackingTouch(slider: Slider) {
+        binding.seekBarPackSize.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                stickersPerPack = progress + 3
+                binding.tvPackSize.text = "Sticker per pacchetto: $stickersPerPack"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
                 loadStickers()
             }
         })
